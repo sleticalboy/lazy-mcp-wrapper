@@ -103,6 +103,39 @@ func QueryStatus(socketPath string) (Status, error) {
 	return status, nil
 }
 
+func SendControl(socketPath, control string) (ControlResponse, error) {
+	if socketPath == "" {
+		return ControlResponse{}, fmt.Errorf("socket path is required")
+	}
+	if control == "" {
+		return ControlResponse{}, fmt.Errorf("control is required")
+	}
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return ControlResponse{}, err
+	}
+	defer conn.Close()
+
+	bind, _ := json.Marshal(BindRequest{Control: control})
+	if _, err := conn.Write(append(bind, '\n')); err != nil {
+		return ControlResponse{}, err
+	}
+
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		return ControlResponse{}, err
+	}
+	var resp ControlResponse
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return ControlResponse{}, err
+	}
+	if !resp.OK && resp.Error == "" {
+		resp.Error = "control failed"
+	}
+	return resp, nil
+}
+
 func closeWrite(conn net.Conn) error {
 	type closeWriter interface {
 		CloseWrite() error

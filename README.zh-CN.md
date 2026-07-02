@@ -267,6 +267,20 @@ logs:   ~/Library/Logs/lazy-mcp-wrapper
 
 安装脚本会把当前 `PATH` 写进 plist，确保 daemon 能找到 `npx`。
 
+daemon 控制命令：
+
+```bash
+lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
+`status` 会输出 daemon pid、启动时间、运行时长、当前 client 数、已转发调用数、最近错误和各 MCP 运行状态。
+
+`stop` 会请求 daemon 退出。如果使用 LaunchAgent 管理，launchd 会按配置重新拉起。
+
+`reload` 当前只返回明确的“不支持热重载”错误。配置变更后使用 `make install-agent` 重新安装并重启 LaunchAgent。
+
 ## 缓存
 
 `tools/list` 默认启用缓存。缓存位置默认在系统用户缓存目录下，也可以通过 `cache_dir` 指定。
@@ -283,7 +297,7 @@ lazy-mcp-wrapper --config ./examples/context7.json --inspect
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-输出会包含已注册 MCP、真实 MCP 是否已经启动、真实进程 pid 和最近使用时间。
+输出会包含 daemon pid、启动时间、运行时长、当前 client 数、已转发调用数、最近错误、已注册 MCP、真实 MCP 是否已经启动、真实进程 pid 和最近使用时间。
 
 刷新缓存：
 

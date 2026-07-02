@@ -27,6 +27,12 @@ func main() {
 		case "status":
 			runStatus(os.Args[2:])
 			return
+		case "stop":
+			runControl(os.Args[2:], "stop")
+			return
+		case "reload":
+			runControl(os.Args[2:], "reload")
+			return
 		}
 	}
 	configPath := flag.String("config", "", "path to wrapper JSON config")
@@ -184,6 +190,23 @@ func runStatus(args []string) {
 	}
 	data, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Println(string(data))
+}
+
+func runControl(args []string, control string) {
+	fs := flag.NewFlagSet(control, flag.ExitOnError)
+	socketPath := fs.String("socket", "", "Unix socket path")
+	_ = fs.Parse(args)
+
+	resp, err := daemon.SendControl(*socketPath, control)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper %s: %v\n", control, err)
+		os.Exit(1)
+	}
+	data, _ := json.MarshalIndent(resp, "", "  ")
+	fmt.Println(string(data))
+	if !resp.OK {
+		os.Exit(1)
+	}
 }
 
 type multiFlag []string

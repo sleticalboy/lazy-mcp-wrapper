@@ -93,6 +93,17 @@ Inspect shared daemon runtime status:
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
+Control the shared daemon:
+
+```bash
+lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
+`status` includes daemon pid, start time, uptime, active clients, forwarded calls, last error, and per-MCP process state.
+
+`reload` currently reports that hot reload is unsupported. Re-run `make install-agent` to apply daemon config changes when using the macOS LaunchAgent.
+
 ## Notes
 
 `node_repl` is intentionally not a good fit for this wrapper because it keeps state between calls. Keep it configured directly unless you are fine with losing REPL state.
@@ -148,6 +159,8 @@ make uninstall-agent
 ```
 
 The installer writes the current `PATH` into the plist so the daemon can find `npx`.
+
+Use `lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock` to ask the daemon to exit. If LaunchAgent management is enabled, launchd will start it again from the installed config.
 
 ## Verification
 

@@ -175,6 +175,15 @@ Shared daemon status:
 /Users/binlee/.local/bin/lazy-mcp-wrapper status --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
+Shared daemon control:
+
+```bash
+/Users/binlee/.local/bin/lazy-mcp-wrapper stop --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
+/Users/binlee/.local/bin/lazy-mcp-wrapper reload --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
+`reload` currently returns an unsupported error. Use `make install-agent` after daemon config changes when the macOS LaunchAgent manages the daemon.
+
 Local smoke commands:
 
 ```bash
