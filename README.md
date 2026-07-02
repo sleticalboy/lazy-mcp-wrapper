@@ -40,6 +40,7 @@ Example:
 ```json
 {
   "name": "context7",
+  "sharing": "shared",
   "command": "npx",
   "args": ["-y", "@upstash/context7-mcp"],
   "real_protocol_version": "2024-11-05",
@@ -72,6 +73,7 @@ args = ["--config", "/absolute/path/to/context7.json"]
   - `header` uses MCP `Content-Length` framing and is the default.
   - `jsonl` uses one JSON-RPC message per line. Context7 v3.2.2, Playwright MCP 1.62.0-alpha, and MasterGo Magic MCP currently use this mode.
 - `tools/list` is cached by default. Cache files are stored under the OS user cache directory unless `cache_dir` is set. Set `disable_cache` to `true` to always query the real MCP server.
+- `sharing` controls daemon sharing strategy. `shared` reuses one proxy per MCP name. `session` creates one proxy per client connection for stateful MCPs.
 
 ## Cache and Inspect
 

@@ -41,6 +41,7 @@ type Status struct {
 type ClientStatus struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Sharing     string    `json:"sharing,omitempty"`
 	Generation  uint64    `json:"generation,omitempty"`
 	ConnectedAt time.Time `json:"connected_at"`
 	RemoteAddr  string    `json:"remote_addr,omitempty"`
@@ -48,6 +49,8 @@ type ClientStatus struct {
 
 type ServerStatus struct {
 	wrapper.ProxyStatus
+	Sharing        string     `json:"sharing"`
+	ActiveSessions int        `json:"active_sessions,omitempty"`
 	Calls          int64      `json:"calls"`
 	Errors         int64      `json:"errors"`
 	LastLatencyMS  int64      `json:"last_latency_ms,omitempty"`
@@ -69,6 +72,7 @@ type ControlResponse struct {
 type Server struct {
 	socketPath       string
 	daemonConfigPath string
+	configs          map[string]wrapper.Config
 	proxies          map[string]*wrapper.Proxy
 	loggers          map[string]*log.Logger
 	closers          map[string]io.Closer
@@ -88,6 +92,7 @@ type Server struct {
 type resourceSet struct {
 	generation uint64
 	proxies    map[string]*wrapper.Proxy
+	configs    map[string]wrapper.Config
 	loggers    map[string]*log.Logger
 	closers    map[string]io.Closer
 	stats      map[string]*proxyStats
@@ -117,6 +122,7 @@ func NewServer(socketPath string, configs []wrapper.Config, loggers map[string]*
 
 	server := &Server{
 		socketPath:    socketPath,
+		configs:       make(map[string]wrapper.Config, len(configs)),
 		proxies:       make(map[string]*wrapper.Proxy, len(configs)),
 		loggers:       make(map[string]*log.Logger, len(configs)),
 		closers:       map[string]io.Closer{},
@@ -153,6 +159,7 @@ func NewServerFromConfig(path string) (*Server, error) {
 	server := &Server{
 		socketPath:       cfg.SocketPath,
 		daemonConfigPath: path,
+		configs:          make(map[string]wrapper.Config, len(cfg.ConfigPaths)),
 		proxies:          make(map[string]*wrapper.Proxy, len(cfg.ConfigPaths)),
 		loggers:          make(map[string]*log.Logger, len(cfg.ConfigPaths)),
 		closers:          make(map[string]io.Closer, len(cfg.ConfigPaths)),
@@ -171,7 +178,13 @@ func NewServerFromConfig(path string) (*Server, error) {
 }
 
 func (s *Server) addProxyLocked(cfg wrapper.Config, logger *log.Logger, closer io.Closer, reloadedAt time.Time) error {
-	if _, exists := s.proxies[cfg.Name]; exists {
+	if cfg.Sharing == "" {
+		cfg.Sharing = "shared"
+	}
+	if cfg.Sharing != "shared" && cfg.Sharing != "session" {
+		return fmt.Errorf("config sharing must be shared or session")
+	}
+	if _, exists := s.configs[cfg.Name]; exists {
 		if closer != nil {
 			_ = closer.Close()
 		}
@@ -181,8 +194,11 @@ func (s *Server) addProxyLocked(cfg wrapper.Config, logger *log.Logger, closer i
 		logger = log.New(io.Discard, "", 0)
 	}
 	name := cfg.Name
-	proxy, stats := s.buildProxy(cfg, logger, reloadedAt)
-	s.proxies[name] = proxy
+	stats := newProxyStats(reloadedAt)
+	s.configs[name] = cfg
+	if cfg.Sharing == "shared" {
+		s.proxies[name] = s.buildProxy(cfg, logger, stats, true)
+	}
 	s.stats[name] = stats
 	s.loggers[name] = logger
 	if closer != nil {
@@ -191,11 +207,14 @@ func (s *Server) addProxyLocked(cfg wrapper.Config, logger *log.Logger, closer i
 	return nil
 }
 
-func (s *Server) buildProxy(cfg wrapper.Config, logger *log.Logger, reloadedAt time.Time) (*wrapper.Proxy, *proxyStats) {
+func newProxyStats(reloadedAt time.Time) *proxyStats {
+	return &proxyStats{lastReloadedAt: reloadedAt}
+}
+
+func (s *Server) buildProxy(cfg wrapper.Config, logger *log.Logger, stats *proxyStats, keepRealOnClientClose bool) *wrapper.Proxy {
 	name := cfg.Name
-	stats := &proxyStats{lastReloadedAt: reloadedAt}
 	proxy := wrapper.NewProxyWithOptions(cfg, logger, wrapper.ProxyOptions{
-		KeepRealOnClientClose: true,
+		KeepRealOnClientClose: keepRealOnClientClose,
 		OnRequest: func(method string) {
 			if method != "initialize" && method != "ping" {
 				s.totalCalls.Add(1)
@@ -217,7 +236,7 @@ func (s *Server) buildProxy(cfg wrapper.Config, logger *log.Logger, reloadedAt t
 			logger.Printf("client response name=%s method=%s latency=%s", name, method, duration)
 		},
 	})
-	return proxy, stats
+	return proxy
 }
 
 func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) (*resourceSet, error) {
@@ -230,11 +249,13 @@ func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) (*resourceSet, err
 	}
 
 	proxies := make(map[string]*wrapper.Proxy, len(cfg.ConfigPaths))
+	configs := make(map[string]wrapper.Config, len(cfg.ConfigPaths))
 	loggers := make(map[string]*log.Logger, len(cfg.ConfigPaths))
 	closers := make(map[string]io.Closer, len(cfg.ConfigPaths))
 	stats := make(map[string]*proxyStats, len(cfg.ConfigPaths))
 	next := &Server{
 		socketPath: s.socketPath,
+		configs:    configs,
 		proxies:    proxies,
 		loggers:    loggers,
 		closers:    closers,
@@ -251,15 +272,18 @@ func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) (*resourceSet, err
 			next.closeResources()
 			return nil, fmt.Errorf("open log for %s: %w", mcpConfig.Name, err)
 		}
-		if _, exists := proxies[mcpConfig.Name]; exists {
+		if _, exists := configs[mcpConfig.Name]; exists {
 			if closer != nil {
 				_ = closer.Close()
 			}
 			next.closeResources()
 			return nil, fmt.Errorf("duplicate MCP name: %s", mcpConfig.Name)
 		}
-		proxy, stat := s.buildProxy(mcpConfig, logger, reloadedAt)
-		proxies[mcpConfig.Name] = proxy
+		stat := newProxyStats(reloadedAt)
+		configs[mcpConfig.Name] = mcpConfig
+		if mcpConfig.Sharing == "shared" {
+			proxies[mcpConfig.Name] = s.buildProxy(mcpConfig, logger, stat, true)
+		}
 		loggers[mcpConfig.Name] = logger
 		stats[mcpConfig.Name] = stat
 		if closer != nil {
@@ -268,6 +292,7 @@ func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) (*resourceSet, err
 	}
 	old := s.currentResourceSetLocked()
 	s.generation++
+	s.configs = next.configs
 	s.proxies = next.proxies
 	s.loggers = next.loggers
 	s.closers = next.closers
@@ -287,6 +312,7 @@ func (s *Server) currentResourceSetLocked() *resourceSet {
 	return &resourceSet{
 		generation: s.generation,
 		proxies:    s.proxies,
+		configs:    s.configs,
 		loggers:    s.loggers,
 		closers:    s.closers,
 		stats:      s.stats,
@@ -478,7 +504,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	proxy, client := s.bindClient(bind.Name, conn.RemoteAddr().String())
+	proxy, client, sessionProxy := s.bindClient(bind.Name, conn.RemoteAddr().String())
 	if proxy == nil {
 		s.setLastError(fmt.Errorf("unknown MCP name: %s", bind.Name))
 		_ = writeBindError(conn, "unknown MCP name: "+bind.Name)
@@ -488,6 +514,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	s.clients.Add(1)
 	defer s.clients.Add(-1)
 	defer s.unregisterClient(client.ID)
+	if sessionProxy {
+		defer proxy.Close()
+	}
 	logger := s.logger(bind.Name)
 	logger.Printf("client connected id=%s name=%s generation=%d remote=%s", client.ID, bind.Name, client.Generation, client.RemoteAddr)
 	defer logger.Printf("client disconnected id=%s name=%s", client.ID, bind.Name)
@@ -523,23 +552,35 @@ func (s *Server) logger(name string) *log.Logger {
 	return log.New(io.Discard, "", 0)
 }
 
-func (s *Server) bindClient(name, remoteAddr string) (*wrapper.Proxy, ClientStatus) {
+func (s *Server) bindClient(name, remoteAddr string) (*wrapper.Proxy, ClientStatus, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cfg, exists := s.configs[name]
+	if !exists {
+		return nil, ClientStatus{}, false
+	}
+	stats := s.stats[name]
+	logger := s.loggers[name]
 	proxy := s.proxies[name]
+	sessionProxy := false
+	if cfg.Sharing == "session" {
+		proxy = s.buildProxy(cfg, logger, stats, false)
+		sessionProxy = true
+	}
 	if proxy == nil {
-		return nil, ClientStatus{}
+		return nil, ClientStatus{}, false
 	}
 	id := fmt.Sprintf("client-%d", s.nextClientID.Add(1))
 	client := ClientStatus{
 		ID:          id,
 		Name:        name,
+		Sharing:     cfg.Sharing,
 		Generation:  s.generation,
 		ConnectedAt: time.Now(),
 		RemoteAddr:  remoteAddr,
 	}
 	s.activeClients[id] = client
-	return proxy, client
+	return proxy, client, sessionProxy
 }
 
 func (s *Server) unregisterClient(id string) {
@@ -565,9 +606,11 @@ func (s *Server) Status() Status {
 		return activeClients[i].ID < activeClients[j].ID
 	})
 
-	names := make([]string, 0, len(s.proxies))
-	for name := range s.proxies {
+	names := make([]string, 0, len(s.configs))
+	configs := make(map[string]wrapper.Config, len(s.configs))
+	for name, cfg := range s.configs {
 		names = append(names, name)
+		configs[name] = cfg
 	}
 	sort.Strings(names)
 	s.mu.Unlock()
@@ -586,16 +629,27 @@ func (s *Server) Status() Status {
 	}
 	for _, name := range names {
 		proxy, stats := s.proxyAndStats(name)
-		if proxy == nil {
-			continue
+		serverStatus := ServerStatus{ProxyStatus: wrapper.ProxyStatus{Name: name}, Sharing: configs[name].Sharing}
+		if proxy != nil {
+			serverStatus.ProxyStatus = proxy.Status()
 		}
-		serverStatus := ServerStatus{ProxyStatus: proxy.Status()}
+		serverStatus.ActiveSessions = countActiveClients(status.ActiveClients, name)
 		if stats != nil {
 			serverStatus.Calls, serverStatus.Errors, serverStatus.LastLatencyMS, serverStatus.AvgLatencyMS, serverStatus.MaxLatencyMS, serverStatus.LastMethod, serverStatus.LastCallAt, serverStatus.LastError, serverStatus.LastErrorAt, serverStatus.LastReloadedAt = stats.status()
 		}
 		status.Servers = append(status.Servers, serverStatus)
 	}
 	return status
+}
+
+func countActiveClients(clients []ClientStatus, name string) int {
+	count := 0
+	for _, client := range clients {
+		if client.Name == name {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *Server) writeStatus(w io.Writer) error {

@@ -224,11 +224,13 @@ func printStatusTable(out io.Writer, status daemon.Status) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Servers:")
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREAL\tPID\tCALLS\tERRS\tLAT(ms)\tLAST METHOD\tLAST USED")
+	fmt.Fprintln(tw, "NAME\tSHARE\tREAL\tPID\tSESS\tCALLS\tERRS\tLAT(ms)\tLAST METHOD\tLAST USED")
 	for _, server := range status.Servers {
 		realState := "down"
 		if server.RealAlive {
 			realState = "up"
+		} else if server.Sharing == "session" {
+			realState = "session"
 		}
 		pid := "-"
 		if server.RealPID > 0 {
@@ -242,10 +244,12 @@ func printStatusTable(out io.Writer, status daemon.Status) {
 		if lastMethod == "" {
 			lastMethod = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n",
 			server.Name,
+			server.Sharing,
 			realState,
 			pid,
+			server.ActiveSessions,
 			server.Calls,
 			server.Errors,
 			latency,

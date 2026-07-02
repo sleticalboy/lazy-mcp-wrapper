@@ -104,6 +104,7 @@ PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 ```json
 {
   "name": "context7",
+  "sharing": "shared",
   "command": "npx",
   "args": ["-y", "@upstash/context7-mcp"],
   "real_protocol_version": "2024-11-05",
@@ -121,6 +122,7 @@ PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 | 字段 | 说明 |
 | --- | --- |
 | `name` | MCP 名称，用于日志、缓存 key 和识别 |
+| `sharing` | daemon 共享策略，支持 `shared` 和 `session`，默认 `shared` |
 | `command` | 启动真实 MCP 的命令 |
 | `args` | 启动真实 MCP 的参数 |
 | `env` | 可选，传给真实 MCP 的环境变量 |

@@ -2,6 +2,7 @@ package wrapper
 
 type InspectInfo struct {
 	Name           string            `json:"name"`
+	Sharing        string            `json:"sharing"`
 	Command        string            `json:"command"`
 	Args           []string          `json:"args"`
 	Env            map[string]string `json:"env,omitempty"`
@@ -23,6 +24,7 @@ func Inspect(cfg Config) InspectInfo {
 	}
 	return InspectInfo{
 		Name:           cfg.Name,
+		Sharing:        cfg.Sharing,
 		Command:        cfg.Command,
 		Args:           redactArgs(cfg.Args),
 		Env:            redactEnv(cfg.Env),

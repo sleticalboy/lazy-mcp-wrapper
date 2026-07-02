@@ -24,6 +24,7 @@ go build -o "${FAKE_MCP}" "${ROOT_DIR}/cmd/fake-mcp"
 
 SOCKET="${TMP_DIR}/lazy-mcpd.sock"
 MCP_CONFIG="${TMP_DIR}/fake.json"
+SESSION_CONFIG="${TMP_DIR}/fake-session.json"
 DAEMON_CONFIG="${TMP_DIR}/daemon.json"
 DAEMON_LOG="${TMP_DIR}/daemon.log"
 CLIENT_OUT="${TMP_DIR}/client.out"
@@ -40,10 +41,23 @@ cat >"${MCP_CONFIG}" <<JSON
 }
 JSON
 
+cat >"${SESSION_CONFIG}" <<JSON
+{
+  "name": "fake-session",
+  "sharing": "session",
+  "command": "${FAKE_MCP}",
+  "disable_cache": true,
+  "idle_timeout": "5s",
+  "startup_timeout": "5s",
+  "call_timeout": "5s",
+  "log_file": "${TMP_DIR}/fake-session.log"
+}
+JSON
+
 cat >"${DAEMON_CONFIG}" <<JSON
 {
   "socket": "${SOCKET}",
-  "configs": ["${MCP_CONFIG}"]
+  "configs": ["${MCP_CONFIG}", "${SESSION_CONFIG}"]
 }
 JSON
 
@@ -60,11 +74,12 @@ if [[ ! -S "${SOCKET}" ]]; then
   exit 1
 fi
 
-printf '%s\n%s\n%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"shared-daemon-smoke","version":"0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | "${WRAPPER}" client --socket "${SOCKET}" --name fake >"${CLIENT_OUT}"
+cat >"${TMP_DIR}/client.in" <<'JSONL'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"shared-daemon-smoke","version":"0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+JSONL
+"${WRAPPER}" client --socket "${SOCKET}" --name fake <"${TMP_DIR}/client.in" >"${CLIENT_OUT}"
 
 grep -Eq '"name"[[:space:]]*:[[:space:]]*"echo"' "${CLIENT_OUT}"
 
@@ -74,8 +89,22 @@ grep -q '"calls": 1' "${STATUS_JSON}"
 grep -q '"last_method": "tools/list"' "${STATUS_JSON}"
 grep -q '"last_latency_ms":' "${STATUS_JSON}"
 
-"${WRAPPER}" status --socket "${SOCKET}" --format table | grep -q 'fake'
-"${WRAPPER}" reload --socket "${SOCKET}" | grep -q '"ok": true'
+"${WRAPPER}" status --socket "${SOCKET}" --format table >"${TMP_DIR}/status-table.out"
+grep -q 'fake' "${TMP_DIR}/status-table.out"
+"${WRAPPER}" reload --socket "${SOCKET}" >"${TMP_DIR}/reload.out"
+grep -q '"ok": true' "${TMP_DIR}/reload.out"
+
+for i in 1 2; do
+  cat >"${TMP_DIR}/session-client-${i}.in" <<'JSONL'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"session-smoke","version":"0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+JSONL
+  "${WRAPPER}" client --socket "${SOCKET}" --name fake-session <"${TMP_DIR}/session-client-${i}.in" >"${TMP_DIR}/session-client-${i}.out"
+done
+"${WRAPPER}" status --socket "${SOCKET}" >"${STATUS_JSON}"
+grep -q '"sharing": "session"' "${STATUS_JSON}"
+grep -q '"calls": 2' "${STATUS_JSON}"
 
 mkfifo "${TMP_DIR}/client.stdin"
 "${WRAPPER}" client --socket "${SOCKET}" --name fake <"${TMP_DIR}/client.stdin" >"${TMP_DIR}/held-client.out" &
@@ -95,12 +124,15 @@ if "${WRAPPER}" reload --socket "${SOCKET}" >"${TMP_DIR}/reload-busy.out" 2>/dev
   exit 1
 fi
 grep -q 'reload busy' "${TMP_DIR}/reload-busy.out"
-"${WRAPPER}" reload --socket "${SOCKET}" --graceful | grep -q '"ok": true'
+"${WRAPPER}" reload --socket "${SOCKET}" --graceful >"${TMP_DIR}/reload-graceful.out"
+grep -q '"ok": true' "${TMP_DIR}/reload-graceful.out"
 exec 3>&-
 wait "${HELD_CLIENT_PID}" 2>/dev/null || true
-"${WRAPPER}" reload --socket "${SOCKET}" --force | grep -q '"ok": true'
+"${WRAPPER}" reload --socket "${SOCKET}" --force >"${TMP_DIR}/reload-force.out"
+grep -q '"ok": true' "${TMP_DIR}/reload-force.out"
 
-"${WRAPPER}" stop --socket "${SOCKET}" | grep -q '"ok": true'
+"${WRAPPER}" stop --socket "${SOCKET}" >"${TMP_DIR}/stop.out"
+grep -q '"ok": true' "${TMP_DIR}/stop.out"
 wait "${DAEMON_PID}"
 DAEMON_PID=""
 

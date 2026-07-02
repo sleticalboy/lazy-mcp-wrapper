@@ -320,6 +320,66 @@ func TestStatusReportsActiveClients(t *testing.T) {
 	}
 }
 
+func TestSessionSharingStartsRealMCPPerClient(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	fakeMCP := buildFakeMCP(t, tempDir)
+	defer os.Remove(socketPath)
+
+	var logBuffer bytes.Buffer
+	cfg := wrapper.Config{Name: "fake", Sharing: "session", Command: fakeMCP, DisableCache: true}
+	cfg.IdleTimeout.Duration = time.Second
+	cfg.StartupTimeout.Duration = 5 * time.Second
+	cfg.CallTimeout.Duration = 5 * time.Second
+	server, err := NewServer(socketPath, []wrapper.Config{cfg}, map[string]*log.Logger{
+		"fake": log.New(&logBuffer, "", 0),
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	for i := 0; i < 2; i++ {
+		var input bytes.Buffer
+		writer := jsonrpc.NewJSONLWriter(&input)
+		if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(1), Method: "initialize", Params: raw(map[string]any{})}); err != nil {
+			t.Fatalf("write initialize: %v", err)
+		}
+		if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(2), Method: "tools/list", Params: raw(map[string]any{})}); err != nil {
+			t.Fatalf("write tools/list: %v", err)
+		}
+		if err := RunClient(socketPath, "fake", &input, &bytes.Buffer{}); err != nil {
+			t.Fatalf("RunClient(%d) error = %v", i, err)
+		}
+	}
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Sharing != "session" {
+		t.Fatalf("unexpected servers: %#v", status.Servers)
+	}
+	if status.Servers[0].Calls != 2 {
+		t.Fatalf("calls = %d, want 2", status.Servers[0].Calls)
+	}
+	if got := strings.Count(logBuffer.String(), "spawned real MCP fake"); got != 2 {
+		t.Fatalf("spawned real MCP count = %d, want 2\nlogs:\n%s", got, logBuffer.String())
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func TestControlReloadRequiresDaemonConfig(t *testing.T) {
 	socketPath := testSocketPath(t)
 	defer os.Remove(socketPath)

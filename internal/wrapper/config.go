@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	Name           string            `json:"name"`
+	Sharing        string            `json:"sharing"`
 	Command        string            `json:"command"`
 	Args           []string          `json:"args"`
 	Env            map[string]string `json:"env"`
@@ -61,6 +62,12 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if cfg.Command == "" {
 		return Config{}, fmt.Errorf("config command is required")
+	}
+	if cfg.Sharing == "" {
+		cfg.Sharing = "shared"
+	}
+	if cfg.Sharing != "shared" && cfg.Sharing != "session" {
+		return Config{}, fmt.Errorf("config sharing must be shared or session")
 	}
 	if _, err := cfg.Framing(); err != nil {
 		return Config{}, err
