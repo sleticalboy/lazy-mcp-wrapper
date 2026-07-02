@@ -104,7 +104,8 @@ func QueryStatus(socketPath string) (Status, error) {
 }
 
 type ControlOptions struct {
-	Force bool
+	Force    bool
+	Graceful bool
 }
 
 func SendControl(socketPath, control string, opts ...ControlOptions) (ControlResponse, error) {
@@ -125,7 +126,7 @@ func SendControl(socketPath, control string, opts ...ControlOptions) (ControlRes
 	if len(opts) > 0 {
 		options = opts[0]
 	}
-	bind, _ := json.Marshal(BindRequest{Control: control, Force: options.Force})
+	bind, _ := json.Marshal(BindRequest{Control: control, Force: options.Force, Graceful: options.Graceful})
 	if _, err := conn.Write(append(bind, '\n')); err != nil {
 		return ControlResponse{}, err
 	}

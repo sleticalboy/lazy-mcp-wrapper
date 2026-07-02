@@ -181,10 +181,11 @@ Shared daemon control:
 ```bash
 /Users/binlee/.local/bin/lazy-mcp-wrapper stop --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
 /Users/binlee/.local/bin/lazy-mcp-wrapper reload --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
+/Users/binlee/.local/bin/lazy-mcp-wrapper reload --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock --graceful
 /Users/binlee/.local/bin/lazy-mcp-wrapper reload --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 ```
 
-`reload` hot-reloads the daemon only when it was started with `--daemon-config`, which is how `make install-agent` configures the macOS LaunchAgent. Manual `daemon --config ...` mode returns an explicit error because it has no reload source. Reload returns busy while active clients are connected unless `--force` is set.
+`reload` hot-reloads the daemon only when it was started with `--daemon-config`, which is how `make install-agent` configures the macOS LaunchAgent. Manual `daemon --config ...` mode returns an explicit error because it has no reload source. Reload returns busy while active clients are connected unless `--graceful` or `--force` is set.
 
 Local smoke commands:
 

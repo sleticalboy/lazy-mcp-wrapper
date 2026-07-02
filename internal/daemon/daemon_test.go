@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -493,6 +494,136 @@ func TestControlReloadBusyRequiresForce(t *testing.T) {
 	}
 }
 
+func TestControlReloadGracefulRetainsActiveClientProxy(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+	fakeMCP := buildFakeMCP(t, tempDir)
+
+	firstConfigPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "first", Command: fakeMCP})
+	daemonConfigPath := writeDaemonConfig(t, tempDir, socketPath, []string{firstConfigPath})
+	server, err := NewServerFromConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("NewServerFromConfig() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial socket: %v", err)
+	}
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	bind, _ := json.Marshal(BindRequest{Name: "first"})
+	if _, err := conn.Write(append(bind, '\n')); err != nil {
+		t.Fatalf("write bind: %v", err)
+	}
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read bind response: %v", err)
+	}
+	var bindResp BindResponse
+	if err := json.Unmarshal(line, &bindResp); err != nil {
+		t.Fatalf("decode bind response: %v", err)
+	}
+	if !bindResp.OK {
+		t.Fatalf("bind response = %#v, want ok", bindResp)
+	}
+
+	secondConfigPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "second", Command: fakeMCP})
+	writeDaemonConfig(t, tempDir, socketPath, []string{secondConfigPath})
+	resp, err := SendControl(socketPath, "reload", ControlOptions{Graceful: true})
+	if err != nil {
+		t.Fatalf("SendControl(graceful reload) error = %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("SendControl(graceful reload) = %#v, want ok", resp)
+	}
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "second" {
+		t.Fatalf("unexpected servers after graceful reload: %#v", status.Servers)
+	}
+	if len(status.ActiveClients) != 1 || status.ActiveClients[0].Name != "first" {
+		t.Fatalf("unexpected active clients after graceful reload: %#v", status.ActiveClients)
+	}
+
+	writer := jsonrpc.NewJSONLWriter(conn)
+	if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(1), Method: "initialize", Params: raw(map[string]any{})}); err != nil {
+		t.Fatalf("write initialize on old client: %v", err)
+	}
+	if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(2), Method: "tools/list", Params: raw(map[string]any{})}); err != nil {
+		t.Fatalf("write tools/list on old client: %v", err)
+	}
+	mcpReader := jsonrpc.NewJSONLReader(reader)
+	if _, err := mcpReader.Read(); err != nil {
+		t.Fatalf("read initialize response on old client: %v", err)
+	}
+	listResp, err := mcpReader.Read()
+	if err != nil {
+		t.Fatalf("read tools/list response on old client: %v", err)
+	}
+	if listResp.Error != nil {
+		t.Fatalf("tools/list on old client error = %#v", listResp.Error)
+	}
+
+	_ = conn.Close()
+	eventually(t, 2*time.Second, func() bool {
+		status, err := QueryStatus(socketPath)
+		return err == nil && len(status.ActiveClients) == 0
+	})
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+func TestControlReloadRejectsForceAndGracefulTogether(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+	fakeMCP := buildFakeMCP(t, tempDir)
+
+	configPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "fake", Command: fakeMCP})
+	daemonConfigPath := writeDaemonConfig(t, tempDir, socketPath, []string{configPath})
+	server, err := NewServerFromConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("NewServerFromConfig() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	resp, err := SendControl(socketPath, "reload", ControlOptions{Force: true, Graceful: true})
+	if err != nil {
+		t.Fatalf("SendControl(reload) error = %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "cannot be used together") {
+		t.Fatalf("SendControl(reload) = %#v, want conflict", resp)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func TestControlStop(t *testing.T) {
 	socketPath := testSocketPath(t)
 	defer os.Remove(socketPath)
@@ -548,7 +679,7 @@ func testCommand(t *testing.T, name string, args ...string) *exec.Cmd {
 
 func testSocketPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(os.TempDir(), "lmcp-"+strings.ReplaceAll(t.Name(), "/", "-")+".sock")
+	return filepath.Join(os.TempDir(), "lmcp-"+strconv.FormatInt(time.Now().UnixNano(), 36)+".sock")
 }
 
 func writeWrapperConfig(t *testing.T, dir string, cfg wrapper.Config) string {
@@ -601,6 +732,18 @@ func waitForSocket(t *testing.T, socketPath string, errc <-chan error) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("socket not created: %s", socketPath)
+}
+
+func eventually(t *testing.T, timeout time.Duration, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("condition was not met within %s", timeout)
 }
 
 func raw(value any) json.RawMessage {

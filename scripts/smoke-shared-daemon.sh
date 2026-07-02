@@ -91,13 +91,14 @@ done
 grep -q '"active_clients":' "${STATUS_JSON}"
 
 if "${WRAPPER}" reload --socket "${SOCKET}" >"${TMP_DIR}/reload-busy.out" 2>/dev/null; then
-  echo "reload without --force unexpectedly succeeded with an active client"
+  echo "reload without --graceful/--force unexpectedly succeeded with an active client"
   exit 1
 fi
 grep -q 'reload busy' "${TMP_DIR}/reload-busy.out"
-"${WRAPPER}" reload --socket "${SOCKET}" --force | grep -q '"ok": true'
+"${WRAPPER}" reload --socket "${SOCKET}" --graceful | grep -q '"ok": true'
 exec 3>&-
 wait "${HELD_CLIENT_PID}" 2>/dev/null || true
+"${WRAPPER}" reload --socket "${SOCKET}" --force | grep -q '"ok": true'
 
 "${WRAPPER}" stop --socket "${SOCKET}" | grep -q '"ok": true'
 wait "${DAEMON_PID}"

@@ -274,6 +274,7 @@ lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --format table
 lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --graceful
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 ```
 
@@ -283,7 +284,7 @@ lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 
 `stop` 会请求 daemon 退出。如果使用 LaunchAgent 管理，launchd 会按配置重新拉起。
 
-`reload` 只支持通过 `--daemon-config` 启动的 daemon，会重新读取 daemon 配置文件并替换 MCP 代理。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。默认情况下，如果存在活跃 client，reload 会返回 busy；使用 `--force` 才会强制替换代理并关闭旧真实 MCP 进程。
+`reload` 只支持通过 `--daemon-config` 启动的 daemon，会重新读取 daemon 配置文件并替换 MCP 代理。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。默认情况下，如果存在活跃 client，reload 会返回 busy；使用 `--graceful` 会让新 client 使用新代理，旧 client 继续使用旧代理直到断开；使用 `--force` 会立即强制替换代理并关闭旧真实 MCP 进程。
 
 ## 缓存
 

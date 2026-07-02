@@ -261,13 +261,13 @@ func printStatusTable(out io.Writer, status daemon.Status) {
 	}
 	fmt.Fprintln(out, "\nActive clients:")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tMCP\tCONNECTED\tREMOTE")
+	fmt.Fprintln(tw, "ID\tMCP\tGEN\tCONNECTED\tREMOTE")
 	for _, client := range status.ActiveClients {
 		remote := client.RemoteAddr
 		if remote == "" {
 			remote = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", client.ID, client.Name, formatTime(client.ConnectedAt), remote)
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", client.ID, client.Name, client.Generation, formatTime(client.ConnectedAt), remote)
 	}
 	_ = tw.Flush()
 }
@@ -290,12 +290,14 @@ func runControl(args []string, control string) {
 	fs := flag.NewFlagSet(control, flag.ExitOnError)
 	socketPath := fs.String("socket", "", "Unix socket path")
 	force := false
+	graceful := false
 	if control == "reload" {
 		fs.BoolVar(&force, "force", false, "force reload even when active clients are connected")
+		fs.BoolVar(&graceful, "graceful", false, "reload new proxies while active clients continue using old proxies")
 	}
 	_ = fs.Parse(args)
 
-	resp, err := daemon.SendControl(*socketPath, control, daemon.ControlOptions{Force: force})
+	resp, err := daemon.SendControl(*socketPath, control, daemon.ControlOptions{Force: force, Graceful: graceful})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper %s: %v\n", control, err)
 		os.Exit(1)

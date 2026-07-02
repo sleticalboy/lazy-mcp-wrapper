@@ -19,9 +19,10 @@ import (
 )
 
 type BindRequest struct {
-	Name    string `json:"name"`
-	Control string `json:"control"`
-	Force   bool   `json:"force,omitempty"`
+	Name     string `json:"name"`
+	Control  string `json:"control"`
+	Force    bool   `json:"force,omitempty"`
+	Graceful bool   `json:"graceful,omitempty"`
 }
 
 type Status struct {
@@ -40,6 +41,7 @@ type Status struct {
 type ClientStatus struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	Generation  uint64    `json:"generation,omitempty"`
 	ConnectedAt time.Time `json:"connected_at"`
 	RemoteAddr  string    `json:"remote_addr,omitempty"`
 }
@@ -71,6 +73,8 @@ type Server struct {
 	loggers          map[string]*log.Logger
 	closers          map[string]io.Closer
 	stats            map[string]*proxyStats
+	generation       uint64
+	retained         []*resourceSet
 	activeClients    map[string]ClientStatus
 	startedAt        time.Time
 	cancel           context.CancelFunc
@@ -79,6 +83,14 @@ type Server struct {
 	totalCalls       atomic.Int64
 	lastError        string
 	mu               sync.Mutex
+}
+
+type resourceSet struct {
+	generation uint64
+	proxies    map[string]*wrapper.Proxy
+	loggers    map[string]*log.Logger
+	closers    map[string]io.Closer
+	stats      map[string]*proxyStats
 }
 
 type proxyStats struct {
@@ -109,6 +121,7 @@ func NewServer(socketPath string, configs []wrapper.Config, loggers map[string]*
 		loggers:       make(map[string]*log.Logger, len(configs)),
 		closers:       map[string]io.Closer{},
 		stats:         make(map[string]*proxyStats, len(configs)),
+		generation:    1,
 		activeClients: make(map[string]ClientStatus),
 		startedAt:     time.Now(),
 	}
@@ -144,12 +157,15 @@ func NewServerFromConfig(path string) (*Server, error) {
 		loggers:          make(map[string]*log.Logger, len(cfg.ConfigPaths)),
 		closers:          make(map[string]io.Closer, len(cfg.ConfigPaths)),
 		stats:            make(map[string]*proxyStats, len(cfg.ConfigPaths)),
+		generation:       1,
 		activeClients:    make(map[string]ClientStatus),
 		startedAt:        time.Now(),
 	}
-	if err := server.reloadFromConfigLocked(time.Time{}); err != nil {
+	if old, err := server.reloadFromConfigLocked(time.Time{}); err != nil {
 		server.closeResources()
 		return nil, err
+	} else if old != nil {
+		server.closeResourceSet(*old)
 	}
 	return server, nil
 }
@@ -204,13 +220,13 @@ func (s *Server) buildProxy(cfg wrapper.Config, logger *log.Logger, reloadedAt t
 	return proxy, stats
 }
 
-func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) error {
+func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) (*resourceSet, error) {
 	cfg, err := LoadConfig(s.daemonConfigPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if cfg.SocketPath != s.socketPath {
-		return fmt.Errorf("reload cannot change socket path from %s to %s", s.socketPath, cfg.SocketPath)
+		return nil, fmt.Errorf("reload cannot change socket path from %s to %s", s.socketPath, cfg.SocketPath)
 	}
 
 	proxies := make(map[string]*wrapper.Proxy, len(cfg.ConfigPaths))
@@ -228,19 +244,19 @@ func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) error {
 		mcpConfig, err := wrapper.LoadConfig(path)
 		if err != nil {
 			next.closeResources()
-			return fmt.Errorf("load config %s: %w", path, err)
+			return nil, fmt.Errorf("load config %s: %w", path, err)
 		}
 		logger, closer, err := wrapper.NewLogger(mcpConfig.LogFile)
 		if err != nil {
 			next.closeResources()
-			return fmt.Errorf("open log for %s: %w", mcpConfig.Name, err)
+			return nil, fmt.Errorf("open log for %s: %w", mcpConfig.Name, err)
 		}
 		if _, exists := proxies[mcpConfig.Name]; exists {
 			if closer != nil {
 				_ = closer.Close()
 			}
 			next.closeResources()
-			return fmt.Errorf("duplicate MCP name: %s", mcpConfig.Name)
+			return nil, fmt.Errorf("duplicate MCP name: %s", mcpConfig.Name)
 		}
 		proxy, stat := s.buildProxy(mcpConfig, logger, reloadedAt)
 		proxies[mcpConfig.Name] = proxy
@@ -250,21 +266,75 @@ func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) error {
 			closers[mcpConfig.Name] = closer
 		}
 	}
-	s.closeResources()
+	old := s.currentResourceSetLocked()
+	s.generation++
 	s.proxies = next.proxies
 	s.loggers = next.loggers
 	s.closers = next.closers
 	s.stats = next.stats
-	return nil
+	return old, nil
 }
 
 func (s *Server) closeResources() {
-	for _, proxy := range s.proxies {
+	s.closeResourceSet(resourceSet{proxies: s.proxies, closers: s.closers})
+	for _, retained := range s.retained {
+		s.closeResourceSet(*retained)
+	}
+	s.retained = nil
+}
+
+func (s *Server) currentResourceSetLocked() *resourceSet {
+	return &resourceSet{
+		generation: s.generation,
+		proxies:    s.proxies,
+		loggers:    s.loggers,
+		closers:    s.closers,
+		stats:      s.stats,
+	}
+}
+
+func (s *Server) closeResourceSet(resources resourceSet) {
+	for _, proxy := range resources.proxies {
 		proxy.Close()
 	}
-	for _, closer := range s.closers {
+	for _, closer := range resources.closers {
 		_ = closer.Close()
 	}
+}
+
+func (s *Server) retainOrCloseResourceSetLocked(resources *resourceSet) {
+	if resources == nil {
+		return
+	}
+	if s.hasActiveClientInGenerationLocked(resources.generation) {
+		s.retained = append(s.retained, resources)
+		return
+	}
+	s.closeResourceSet(*resources)
+}
+
+func (s *Server) closeRetainedIfIdleLocked(generation uint64) {
+	if s.hasActiveClientInGenerationLocked(generation) {
+		return
+	}
+	retained := s.retained[:0]
+	for _, resources := range s.retained {
+		if resources.generation == generation {
+			s.closeResourceSet(*resources)
+			continue
+		}
+		retained = append(retained, resources)
+	}
+	s.retained = retained
+}
+
+func (s *Server) hasActiveClientInGenerationLocked(generation uint64) bool {
+	for _, client := range s.activeClients {
+		if client.Generation == generation {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *proxyStats) recordCall(method string) {
@@ -397,7 +467,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			s.stop()
 			return
 		case "reload":
-			if err := s.reload(bind.Force); err != nil {
+			if err := s.reload(ControlOptions{Force: bind.Force, Graceful: bind.Graceful}); err != nil {
 				_ = s.writeControl(conn, ControlResponse{OK: false, Error: err.Error()})
 				return
 			}
@@ -408,7 +478,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	proxy := s.proxy(bind.Name)
+	proxy, client := s.bindClient(bind.Name, conn.RemoteAddr().String())
 	if proxy == nil {
 		s.setLastError(fmt.Errorf("unknown MCP name: %s", bind.Name))
 		_ = writeBindError(conn, "unknown MCP name: "+bind.Name)
@@ -417,10 +487,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	_ = writeBindOK(conn)
 	s.clients.Add(1)
 	defer s.clients.Add(-1)
-	client := s.registerClient(bind.Name, conn.RemoteAddr().String())
 	defer s.unregisterClient(client.ID)
 	logger := s.logger(bind.Name)
-	logger.Printf("client connected id=%s name=%s remote=%s", client.ID, bind.Name, client.RemoteAddr)
+	logger.Printf("client connected id=%s name=%s generation=%d remote=%s", client.ID, bind.Name, client.Generation, client.RemoteAddr)
 	defer logger.Printf("client disconnected id=%s name=%s", client.ID, bind.Name)
 
 	stream := &boundConn{
@@ -454,24 +523,33 @@ func (s *Server) logger(name string) *log.Logger {
 	return log.New(io.Discard, "", 0)
 }
 
-func (s *Server) registerClient(name, remoteAddr string) ClientStatus {
+func (s *Server) bindClient(name, remoteAddr string) (*wrapper.Proxy, ClientStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	proxy := s.proxies[name]
+	if proxy == nil {
+		return nil, ClientStatus{}
+	}
 	id := fmt.Sprintf("client-%d", s.nextClientID.Add(1))
 	client := ClientStatus{
 		ID:          id,
 		Name:        name,
+		Generation:  s.generation,
 		ConnectedAt: time.Now(),
 		RemoteAddr:  remoteAddr,
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.activeClients[id] = client
-	return client
+	return proxy, client
 }
 
 func (s *Server) unregisterClient(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	client, ok := s.activeClients[id]
 	delete(s.activeClients, id)
+	if ok {
+		s.closeRetainedIfIdleLocked(client.Generation)
+	}
 }
 
 func (s *Server) Status() Status {
@@ -547,18 +625,27 @@ func (s *Server) stop() {
 	}
 }
 
-func (s *Server) reload(force bool) error {
+func (s *Server) reload(opts ControlOptions) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.daemonConfigPath == "" {
 		return fmt.Errorf("reload requires daemon to start with --daemon-config")
 	}
-	if !force && len(s.activeClients) > 0 {
-		return fmt.Errorf("reload busy: %d active client(s); retry later or use --force", len(s.activeClients))
+	if opts.Force && opts.Graceful {
+		return fmt.Errorf("reload --force and --graceful cannot be used together")
 	}
-	if err := s.reloadFromConfigLocked(time.Now()); err != nil {
+	if !opts.Force && !opts.Graceful && len(s.activeClients) > 0 {
+		return fmt.Errorf("reload busy: %d active client(s); retry later or use --graceful or --force", len(s.activeClients))
+	}
+	old, err := s.reloadFromConfigLocked(time.Now())
+	if err != nil {
 		s.lastError = err.Error()
 		return err
+	}
+	if opts.Graceful {
+		s.retainOrCloseResourceSetLocked(old)
+	} else if old != nil {
+		s.closeResourceSet(*old)
 	}
 	s.lastError = ""
 	return nil

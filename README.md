@@ -99,12 +99,13 @@ Control the shared daemon:
 ```bash
 lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --graceful
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 ```
 
 `status` includes daemon config path, daemon pid, start time, uptime, active client sessions, forwarded calls, last error, and per-MCP metrics such as calls, errors, last method, last error, and latency.
 
-`reload` hot-reloads the daemon config only when the daemon was started with `--daemon-config`. Manual `daemon --config ...` mode has no reload source and returns an explicit error. By default, reload returns busy when active clients are connected; use `--force` to replace proxies and close old real MCP processes anyway.
+`reload` hot-reloads the daemon config only when the daemon was started with `--daemon-config`. Manual `daemon --config ...` mode has no reload source and returns an explicit error. By default, reload returns busy when active clients are connected. Use `--graceful` to route new clients to the new proxy set while existing clients keep their old proxies until disconnect. Use `--force` to replace proxies and close old real MCP processes immediately.
 
 ## Notes
 
