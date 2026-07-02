@@ -151,6 +151,10 @@ lazy-mcp-wrapper client \
 ```bash
 lazy-mcp-wrapper status \
   --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+
+lazy-mcp-wrapper status \
+  --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock \
+  --format table
 ```
 
 状态输出包含：
@@ -292,7 +296,6 @@ make uninstall-agent
 
 第二阶段可以考虑：
 
-- status table 输出。
 - reload 安全策略：busy 检测或 graceful reload。
 - Playwright session 隔离。
 - 与其他 MCP 客户端共享，不局限于 Codex。

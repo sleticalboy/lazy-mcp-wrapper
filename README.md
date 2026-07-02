@@ -91,6 +91,7 @@ Inspect shared daemon runtime status:
 
 ```bash
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --format table
 ```
 
 Control the shared daemon:
@@ -195,6 +196,12 @@ Run the full local smoke suite:
 
 ```bash
 ./scripts/smoke.sh
+```
+
+Run the shared daemon smoke test with a local fake MCP:
+
+```bash
+make smoke-shared-daemon
 ```
 
 The MasterGo smoke uses `configs.local/mastergo-magic-mcp.json` when present, because the committed example intentionally contains no real token. Its tool call allows a validation error result because MasterGo design tools require a real `fileId`/`layerId`; that still verifies the wrapper can initialize the real MCP and forward `tools/call`.

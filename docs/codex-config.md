@@ -173,6 +173,7 @@ Shared daemon status:
 
 ```bash
 /Users/binlee/.local/bin/lazy-mcp-wrapper status --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
+/Users/binlee/.local/bin/lazy-mcp-wrapper status --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock --format table
 ```
 
 Shared daemon control:
@@ -189,6 +190,7 @@ Local smoke commands:
 ```bash
 cd /Users/binlee/code/open-source/lazy-mcp-wrapper
 ./scripts/smoke.sh
+make smoke-shared-daemon
 ```
 
 ## Rollback

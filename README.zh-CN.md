@@ -271,6 +271,7 @@ daemon 控制命令：
 
 ```bash
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --format table
 lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
@@ -339,6 +340,12 @@ GOCACHE=/private/tmp/lazy-mcp-wrapper-gocache go test ./...
 
 ```bash
 ./scripts/smoke.sh
+```
+
+运行 shared daemon smoke：
+
+```bash
+make smoke-shared-daemon
 ```
 
 手动 smoke 某个真实 MCP：

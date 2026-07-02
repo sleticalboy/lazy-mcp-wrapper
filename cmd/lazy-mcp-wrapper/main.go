@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"text/tabwriter"
+	"time"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
 	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
@@ -188,6 +190,7 @@ func runClient(args []string) {
 func runStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	socketPath := fs.String("socket", "", "Unix socket path")
+	format := fs.String("format", "json", "output format: json or table")
 	_ = fs.Parse(args)
 
 	status, err := daemon.QueryStatus(*socketPath)
@@ -195,8 +198,92 @@ func runStatus(args []string) {
 		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper status: %v\n", err)
 		os.Exit(1)
 	}
+	switch *format {
+	case "json":
+	case "table":
+		printStatusTable(os.Stdout, status)
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper status: unsupported format %q\n", *format)
+		os.Exit(2)
+	}
 	data, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Println(string(data))
+}
+
+func printStatusTable(out io.Writer, status daemon.Status) {
+	fmt.Fprintf(out, "Socket: %s\n", status.SocketPath)
+	if status.DaemonConfigPath != "" {
+		fmt.Fprintf(out, "Config: %s\n", status.DaemonConfigPath)
+	}
+	fmt.Fprintf(out, "Daemon: pid=%d uptime=%s clients=%d total_calls=%d\n", status.DaemonPID, status.Uptime, status.Clients, status.TotalCalls)
+	if status.LastError != "" {
+		fmt.Fprintf(out, "Last error: %s\n", status.LastError)
+	}
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Servers:")
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tREAL\tPID\tCALLS\tERRS\tLAT(ms)\tLAST METHOD\tLAST USED")
+	for _, server := range status.Servers {
+		realState := "down"
+		if server.RealAlive {
+			realState = "up"
+		}
+		pid := "-"
+		if server.RealPID > 0 {
+			pid = fmt.Sprintf("%d", server.RealPID)
+		}
+		latency := "-"
+		if server.LastLatencyMS > 0 || server.AvgLatencyMS > 0 || server.MaxLatencyMS > 0 {
+			latency = fmt.Sprintf("%d/%d/%d", server.LastLatencyMS, server.AvgLatencyMS, server.MaxLatencyMS)
+		}
+		lastMethod := server.LastMethod
+		if lastMethod == "" {
+			lastMethod = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
+			server.Name,
+			realState,
+			pid,
+			server.Calls,
+			server.Errors,
+			latency,
+			lastMethod,
+			formatTimePtr(server.LastUsedAt),
+		)
+	}
+	_ = tw.Flush()
+
+	if len(status.ActiveClients) == 0 {
+		fmt.Fprintln(out, "\nActive clients: none")
+		return
+	}
+	fmt.Fprintln(out, "\nActive clients:")
+	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tMCP\tCONNECTED\tREMOTE")
+	for _, client := range status.ActiveClients {
+		remote := client.RemoteAddr
+		if remote == "" {
+			remote = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", client.ID, client.Name, formatTime(client.ConnectedAt), remote)
+	}
+	_ = tw.Flush()
+}
+
+func formatTimePtr(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return "-"
+	}
+	return formatTime(*value)
+}
+
+func formatTime(value time.Time) string {
+	if value.IsZero() {
+		return "-"
+	}
+	return value.Format("2006-01-02 15:04:05")
 }
 
 func runControl(args []string, control string) {
