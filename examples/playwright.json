@@ -1,0 +1,11 @@
+{
+  "name": "playwright",
+  "command": "npx",
+  "args": ["@playwright/mcp@latest"],
+  "real_protocol_version": "2024-11-05",
+  "real_framing": "jsonl",
+  "idle_timeout": "5m",
+  "startup_timeout": "30s",
+  "call_timeout": "180s",
+  "log_file": "/tmp/lazy-mcp-wrapper-playwright.log"
+}

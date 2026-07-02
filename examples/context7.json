@@ -1,0 +1,11 @@
+{
+  "name": "context7",
+  "command": "npx",
+  "args": ["-y", "@upstash/context7-mcp"],
+  "real_protocol_version": "2024-11-05",
+  "real_framing": "jsonl",
+  "idle_timeout": "15s",
+  "startup_timeout": "30s",
+  "call_timeout": "120s",
+  "log_file": "/tmp/lazy-mcp-wrapper-context7.log"
+}

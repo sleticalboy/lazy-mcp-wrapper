@@ -1,0 +1,6 @@
+/bin/
+/configs.local/
+/dist/
+/tmp/
+*.log
+.DS_Store
