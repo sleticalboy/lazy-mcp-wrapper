@@ -9,11 +9,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
+	"github.com/binlee/lazy-mcp-wrapper/internal/setup"
 	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
 )
 
@@ -34,6 +36,9 @@ func main() {
 			return
 		case "reload":
 			runControl(os.Args[2:], "reload")
+			return
+		case "setup":
+			runSetup(os.Args[2:])
 			return
 		}
 	}
@@ -311,6 +316,42 @@ func runControl(args []string, control string) {
 	if !resp.OK {
 		os.Exit(1)
 	}
+}
+
+func runSetup(args []string) {
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	yes := fs.Bool("yes", false, "apply all changes without prompts")
+	dryRun := fs.Bool("dry-run", false, "print setup plan without applying")
+	home := fs.String("home", "", "home directory to scan; defaults to current user home")
+	binaryPath := fs.String("bin", "", "lazy-mcp-wrapper binary path; defaults to current executable")
+	_ = fs.Parse(args)
+
+	bin := *binaryPath
+	if bin == "" {
+		if exe, err := os.Executable(); err == nil {
+			bin = exe
+		}
+	}
+	opts := setup.Options{
+		Home:       *home,
+		BinaryPath: bin,
+		YesAll:     *yes,
+		DryRun:     *dryRun,
+	}
+	plan, err := setup.NewPlan(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup: %v\n", err)
+		os.Exit(1)
+	}
+	setup.PrintPlan(os.Stdout, plan)
+	if *dryRun {
+		return
+	}
+	if err := plan.Apply(opts); err != nil {
+		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stdout, "\nDone. Verify with: %s status --socket %s --format table\n", filepath.Base(bin), plan.DaemonConfig.SocketPath)
 }
 
 type multiFlag []string

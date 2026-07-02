@@ -1,0 +1,359 @@
+package setup
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
+	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
+)
+
+const (
+	defaultLabel = "com.binlee.lazy-mcp-wrapper"
+	socketRel    = ".lazy-mcp-wrapper/lazy-mcpd.sock"
+	daemonRel    = ".lazy-mcp-wrapper/config.json"
+	wrappersRel  = ".lazy-mcp-wrapper/wrappers"
+)
+
+type Options struct {
+	Home       string
+	BinaryPath string
+	YesAll     bool
+	DryRun     bool
+	Now        time.Time
+}
+
+type Plan struct {
+	DetectedClients []ClientInfo
+	WrapperConfigs  []WrapperConfigPlan
+	ClientUpdates   []ClientUpdate
+	DaemonConfig    DaemonConfigPlan
+	LaunchAgent     LaunchAgentPlan
+	Blockers        []string
+}
+
+type WrapperConfigPlan struct {
+	Server     RawServer
+	ConfigPath string
+	Content    wrapper.Config
+}
+
+type ClientUpdate struct {
+	Kind       string
+	ConfigPath string
+	BackupPath string
+	Servers    []RawServer
+	NewContent []byte
+}
+
+type DaemonConfigPlan struct {
+	ConfigPath  string
+	SocketPath  string
+	ConfigPaths []string
+	Content     []byte
+}
+
+type LaunchAgentPlan struct {
+	Label              string
+	PlistPath          string
+	SocketPath         string
+	SocketPollAttempts int
+	DaemonConfig       string
+	BinaryPath         string
+	LogDir             string
+	PATH               string
+	Content            []byte
+}
+
+func NewPlan(opts Options) (Plan, error) {
+	opts = normalizeOptions(opts)
+	var plan Plan
+
+	if opts.BinaryPath == "" {
+		plan.Blockers = append(plan.Blockers, "binary path is required")
+	}
+
+	wrappable := map[string]RawServer{}
+	for _, adapter := range allAdapters(opts.Home) {
+		if !adapter.Installed() {
+			continue
+		}
+		servers, err := adapter.ReadServers()
+		if err != nil {
+			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %v", adapter.Kind(), err))
+			continue
+		}
+		info := ClientInfo{Kind: adapter.Kind(), ConfigPath: adapter.ConfigPath(), Servers: servers}
+		plan.DetectedClients = append(plan.DetectedClients, info)
+		for _, server := range servers {
+			if server.IsWrappable {
+				server.Name = canonicalName(server.Name)
+				key := strings.ToLower(server.Name)
+				if _, exists := wrappable[key]; !exists {
+					wrappable[key] = server
+				}
+			}
+		}
+	}
+
+	names := make([]string, 0, len(wrappable))
+	for name := range wrappable {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	wrapperDir := filepath.Join(opts.Home, wrappersRel)
+	for _, name := range names {
+		server := wrappable[name]
+		configPath := filepath.Join(wrapperDir, safeName(name)+".json")
+		plan.WrapperConfigs = append(plan.WrapperConfigs, WrapperConfigPlan{
+			Server:     server,
+			ConfigPath: configPath,
+			Content:    buildWrapperConfig(opts.Home, server),
+		})
+	}
+
+	socketPath := filepath.Join(opts.Home, socketRel)
+	daemonConfigPath := filepath.Join(opts.Home, daemonRel)
+	mergedConfigPaths := mergeConfigPaths(existingDaemonConfigPaths(daemonConfigPath), configPaths(plan.WrapperConfigs))
+	if len(mergedConfigPaths) == 0 {
+		plan.Blockers = append(plan.Blockers, "no wrappable stdio MCP servers found")
+	}
+	daemonData, err := json.MarshalIndent(map[string]any{
+		"socket":  socketPath,
+		"configs": mergedConfigPaths,
+	}, "", "  ")
+	if err != nil {
+		return Plan{}, err
+	}
+	daemonData = append(daemonData, '\n')
+	plan.DaemonConfig = DaemonConfigPlan{
+		ConfigPath:  daemonConfigPath,
+		SocketPath:  socketPath,
+		ConfigPaths: mergedConfigPaths,
+		Content:     daemonData,
+	}
+
+	for _, adapter := range allAdapters(opts.Home) {
+		if !adapter.Installed() {
+			continue
+		}
+		servers, err := adapter.ReadServers()
+		if err != nil {
+			continue
+		}
+		next := replaceWithWrapperRefs(servers, opts.BinaryPath, socketPath)
+		newContent, err := renderAdapterContent(adapter, next)
+		if err != nil {
+			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s render: %v", adapter.Kind(), err))
+			continue
+		}
+		currentContent, err := os.ReadFile(adapter.ConfigPath())
+		if err == nil && bytes.Equal(currentContent, newContent) {
+			continue
+		}
+		plan.ClientUpdates = append(plan.ClientUpdates, ClientUpdate{
+			Kind:       adapter.Kind(),
+			ConfigPath: adapter.ConfigPath(),
+			BackupPath: backupPath(adapter.ConfigPath(), opts.Now),
+			Servers:    next,
+			NewContent: newContent,
+		})
+	}
+
+	plistPath := filepath.Join(opts.Home, "Library", "LaunchAgents", defaultLabel+".plist")
+	logDir := filepath.Join(opts.Home, "Library", "Logs", "lazy-mcp-wrapper")
+	pathValue := os.Getenv("PATH")
+	plist := buildPlistXML(LaunchAgentPlan{
+		Label:              defaultLabel,
+		PlistPath:          plistPath,
+		SocketPath:         socketPath,
+		SocketPollAttempts: 50,
+		DaemonConfig:       daemonConfigPath,
+		BinaryPath:         opts.BinaryPath,
+		LogDir:             logDir,
+		PATH:               pathValue,
+	})
+	plan.LaunchAgent = LaunchAgentPlan{
+		Label:              defaultLabel,
+		PlistPath:          plistPath,
+		SocketPath:         socketPath,
+		SocketPollAttempts: 50,
+		DaemonConfig:       daemonConfigPath,
+		BinaryPath:         opts.BinaryPath,
+		LogDir:             logDir,
+		PATH:               pathValue,
+		Content:            []byte(plist),
+	}
+
+	return plan, nil
+}
+
+func (p Plan) Apply(opts Options) error {
+	opts = normalizeOptions(opts)
+	if len(p.Blockers) > 0 {
+		return fmt.Errorf("setup has blockers: %s", strings.Join(p.Blockers, "; "))
+	}
+
+	if len(p.WrapperConfigs) > 0 && shouldApply(opts, "Create wrapper configs in "+filepath.Join(opts.Home, wrappersRel)+"?") {
+		if err := writeWrapperConfigs(p.WrapperConfigs); err != nil {
+			return err
+		}
+	}
+	if shouldApply(opts, "Install daemon as macOS LaunchAgent?") {
+		if err := writeDaemonConfig(p.DaemonConfig); err != nil {
+			return err
+		}
+		if err := installLaunchAgent(p.LaunchAgent, realExec); err != nil {
+			return err
+		}
+	}
+	if len(p.ClientUpdates) > 0 && shouldApply(opts, "Update client configs with backups?") {
+		for _, update := range p.ClientUpdates {
+			if err := os.MkdirAll(filepath.Dir(update.BackupPath), 0755); err != nil {
+				return err
+			}
+			original, err := os.ReadFile(update.ConfigPath)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(update.BackupPath, original, 0644); err != nil {
+				return err
+			}
+			if err := os.WriteFile(update.ConfigPath, update.NewContent, 0644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeOptions(opts Options) Options {
+	if opts.Home == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			opts.Home = home
+		}
+	}
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	return opts
+}
+
+func buildWrapperConfig(home string, server RawServer) wrapper.Config {
+	sharing := "shared"
+	if isStateful(server.Name, server.Command, server.Args) {
+		sharing = "session"
+	}
+	return wrapper.Config{
+		Name:           server.Name,
+		Sharing:        sharing,
+		Command:        server.Command,
+		Args:           server.Args,
+		Env:            server.Env,
+		RealProtocol:   "2024-11-05",
+		RealFraming:    "jsonl",
+		IdleTimeout:    wrapper.Duration{Duration: 5 * time.Minute},
+		StartupTimeout: wrapper.Duration{Duration: 30 * time.Second},
+		CallTimeout:    wrapper.Duration{Duration: 180 * time.Second},
+		LogFile:        filepath.Join(os.TempDir(), "lazy-mcp-wrapper-"+safeName(server.Name)+".log"),
+	}
+}
+
+func isStateful(name, command string, args []string) bool {
+	value := strings.ToLower(name + " " + command + " " + strings.Join(args, " "))
+	return strings.Contains(value, "playwright")
+}
+
+func configPaths(configs []WrapperConfigPlan) []string {
+	paths := make([]string, 0, len(configs))
+	for _, cfg := range configs {
+		paths = append(paths, cfg.ConfigPath)
+	}
+	return paths
+}
+
+func existingDaemonConfigPaths(path string) []string {
+	cfg, err := daemon.LoadConfig(path)
+	if err != nil {
+		return nil
+	}
+	return cfg.ConfigPaths
+}
+
+func mergeConfigPaths(existing, next []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, path := range append(existing, next...) {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	return out
+}
+
+func replaceWithWrapperRefs(servers []RawServer, binaryPath, socketPath string) []RawServer {
+	out := make([]RawServer, 0, len(servers))
+	for _, server := range servers {
+		next := server
+		if server.IsWrappable {
+			next.Name = canonicalName(server.Name)
+			next.Type = "stdio"
+			next.Command = binaryPath
+			next.Args = []string{"client", "--socket", socketPath, "--name", next.Name}
+			next.Env = nil
+			next.IsWrappable = false
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func writeWrapperConfigs(configs []WrapperConfigPlan) error {
+	for _, cfg := range configs {
+		if err := os.MkdirAll(filepath.Dir(cfg.ConfigPath), 0755); err != nil {
+			return err
+		}
+		data, err := json.MarshalIndent(cfg.Content, "", "  ")
+		if err != nil {
+			return err
+		}
+		data = append(data, '\n')
+		if err := os.WriteFile(cfg.ConfigPath, data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeDaemonConfig(plan DaemonConfigPlan) error {
+	if err := os.MkdirAll(filepath.Dir(plan.ConfigPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(plan.ConfigPath, plan.Content, 0644)
+}
+
+func backupPath(path string, now time.Time) string {
+	return fmt.Sprintf("%s.bak-%s", path, now.Format("20060102150405"))
+}
+
+func safeName(name string) string {
+	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-", ":", "-")
+	return replacer.Replace(name)
+}
+
+func canonicalName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if strings.EqualFold(trimmed, "playwright") {
+		return "playwright"
+	}
+	return trimmed
+}
