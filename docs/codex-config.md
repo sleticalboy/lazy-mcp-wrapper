@@ -97,6 +97,40 @@ args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/configs.loc
 
 Do not wrap `node_repl` for now. It keeps REPL state between calls, so lazy shutdown would lose state and break browser/plugin workflows.
 
+## Shared Daemon Phase 1
+
+Use this mode when multiple Codex CLI sessions should share stateless MCP servers.
+
+Start the daemon first:
+
+```bash
+/Users/binlee/.local/bin/lazy-mcp-wrapper daemon \
+  --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock \
+  --config /Users/binlee/code/open-source/lazy-mcp-wrapper/examples/context7.json \
+  --config /Users/binlee/code/open-source/lazy-mcp-wrapper/configs.local/mastergo-magic-mcp.json
+```
+
+Then configure Codex clients:
+
+```toml
+[mcp_servers.context7]
+type = "stdio"
+command = "/Users/binlee/.local/bin/lazy-mcp-wrapper"
+args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "context7"]
+
+[mcp_servers.mastergo-magic-mcp]
+type = "stdio"
+command = "/Users/binlee/.local/bin/lazy-mcp-wrapper"
+args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "mastergo-magic-mcp"]
+
+[mcp_servers.playwright]
+type = "stdio"
+command = "/Users/binlee/.local/bin/lazy-mcp-wrapper"
+args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/playwright.json"]
+```
+
+Keep Playwright in direct lazy wrapper mode for now. A shared Playwright instance can leak browser state across Codex sessions.
+
 ## Verification After Switching
 
 Start a new Codex session after editing `~/.codex/config.toml`, then verify:

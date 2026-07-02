@@ -51,3 +51,25 @@ func TestReadWriteJSONL(t *testing.T) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
+
+func TestAutoReaderAcceptsJSONL(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewJSONLWriter(&buf)
+	want := Message{
+		JSONRPC: "2.0",
+		ID:      []byte(`3`),
+		Method:  "initialize",
+	}
+
+	if err := writer.Write(want); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	got, err := NewReader(&buf).Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if got.JSONRPC != want.JSONRPC || got.Method != want.Method || string(got.ID) != string(want.ID) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}

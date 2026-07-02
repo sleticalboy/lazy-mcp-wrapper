@@ -1,5 +1,7 @@
 # lazy-mcp-wrapper
 
+中文文档: [README.zh-CN.md](./README.zh-CN.md)
+
 `lazy-mcp-wrapper` is a lightweight stdio MCP proxy. Codex starts this wrapper, and the wrapper starts the real MCP server only when a forwarded method is needed.
 
 The intended use case is reducing idle memory usage for MCP servers such as Context7, Playwright, and MasterGo.
@@ -88,6 +90,28 @@ lazy-mcp-wrapper --config ./examples/context7.json --inspect
 ## Notes
 
 `node_repl` is intentionally not a good fit for this wrapper because it keeps state between calls. Keep it configured directly unless you are fine with losing REPL state.
+
+## Shared Daemon Mode
+
+Multiple Codex CLI sessions can share stateless MCP servers through one daemon:
+
+```bash
+lazy-mcp-wrapper daemon \
+  --socket /Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock \
+  --config ./examples/context7.json \
+  --config ./configs.local/mastergo-magic-mcp.json
+```
+
+Codex client config:
+
+```toml
+[mcp_servers.context7]
+type = "stdio"
+command = "/Users/you/.local/bin/lazy-mcp-wrapper"
+args = ["client", "--socket", "/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "context7"]
+```
+
+Phase 1 is intended for stateless or read-only MCP servers such as Context7 and MasterGo. Keep Playwright in direct lazy wrapper mode until session isolation is implemented.
 
 ## Verification
 

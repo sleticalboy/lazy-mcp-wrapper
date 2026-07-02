@@ -25,6 +25,7 @@ const (
 type Proxy struct {
 	cfg            Config
 	log            *log.Logger
+	opts           ProxyOptions
 	client         *realClient
 	clientProtocol string
 	clientInfo     map[string]any
@@ -32,8 +33,16 @@ type Proxy struct {
 	mu             sync.Mutex
 }
 
+type ProxyOptions struct {
+	KeepRealOnClientClose bool
+}
+
 func NewProxy(cfg Config, logger *log.Logger) *Proxy {
 	return &Proxy{cfg: cfg, log: logger}
+}
+
+func NewProxyWithOptions(cfg Config, logger *log.Logger, opts ProxyOptions) *Proxy {
+	return &Proxy{cfg: cfg, log: logger, opts: opts}
 }
 
 func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -44,7 +53,9 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 		msg, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				p.stopReal()
+				if !p.opts.KeepRealOnClientClose {
+					p.stopReal()
+				}
 				return nil
 			}
 			p.log.Printf("read client message failed: %v", err)
@@ -58,13 +69,21 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 			continue
 		}
 		if !msg.IsRequest() {
+			if reader.SeenFraming() {
+				writer = jsonrpc.NewWriterWithFraming(out, reader.Framing())
+			}
 			_ = writer.Write(jsonrpc.ErrorResponse(msg.ID, errInvalidReq, "invalid JSON-RPC message"))
 			continue
 		}
 
 		resp := p.handleRequest(ctx, msg)
+		if reader.SeenFraming() {
+			writer = jsonrpc.NewWriterWithFraming(out, reader.Framing())
+		}
 		if err := writer.Write(resp); err != nil {
-			p.stopReal()
+			if !p.opts.KeepRealOnClientClose {
+				p.stopReal()
+			}
 			return err
 		}
 	}
@@ -224,6 +243,7 @@ type realClient struct {
 	framing   jsonrpc.Framing
 	responses chan jsonrpc.Message
 	done      chan struct{}
+	callMu    sync.Mutex
 	mu        sync.Mutex
 	nextID    int64
 	timer     *time.Timer
@@ -320,6 +340,9 @@ func (c *realClient) initialize(ctx context.Context, init initRequest) error {
 }
 
 func (c *realClient) call(ctx context.Context, method string, params json.RawMessage) (jsonrpc.Message, error) {
+	c.callMu.Lock()
+	defer c.callMu.Unlock()
+
 	c.mu.Lock()
 	c.nextID++
 	id := c.nextID

@@ -32,6 +32,7 @@ func NormalizeFraming(value string) (Framing, error) {
 type Reader struct {
 	r     *bufio.Reader
 	jsonl bool
+	seen  bool
 }
 
 func NewReader(r io.Reader) *Reader {
@@ -39,7 +40,7 @@ func NewReader(r io.Reader) *Reader {
 }
 
 func NewJSONLReader(r io.Reader) *Reader {
-	return &Reader{r: bufio.NewReader(r), jsonl: true}
+	return &Reader{r: bufio.NewReader(r), jsonl: true, seen: true}
 }
 
 func NewReaderWithFraming(r io.Reader, framing Framing) *Reader {
@@ -53,7 +54,31 @@ func (r *Reader) Read() (Message, error) {
 	if r.jsonl {
 		return r.readJSONL()
 	}
-	return r.readHeader()
+	return r.readAuto()
+}
+
+func (r *Reader) readAuto() (Message, error) {
+	for {
+		line, err := r.r.ReadBytes('\n')
+		if err != nil {
+			return Message{}, err
+		}
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		if bytes.HasPrefix(trimmed, []byte("{")) {
+			r.jsonl = true
+			r.seen = true
+			var msg Message
+			if err := json.Unmarshal(trimmed, &msg); err != nil {
+				return Message{}, err
+			}
+			return msg, nil
+		}
+		r.seen = true
+		return r.readHeaderAfterFirstLine(string(line))
+	}
 }
 
 func (r *Reader) readJSONL() (Message, error) {
@@ -76,7 +101,17 @@ func (r *Reader) readJSONL() (Message, error) {
 }
 
 func (r *Reader) readHeader() (Message, error) {
+	return r.readHeaderAfterFirstLine("")
+}
+
+func (r *Reader) readHeaderAfterFirstLine(firstLine string) (Message, error) {
 	contentLength := -1
+
+	if firstLine != "" {
+		if err := parseHeaderLine(firstLine, &contentLength); err != nil {
+			return Message{}, err
+		}
+	}
 
 	for {
 		line, err := r.r.ReadString('\n')
@@ -87,17 +122,8 @@ func (r *Reader) readHeader() (Message, error) {
 		if line == "" {
 			break
 		}
-
-		name, value, ok := strings.Cut(line, ":")
-		if !ok {
-			return Message{}, fmt.Errorf("invalid header line: %q", line)
-		}
-		if strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
-			n, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil {
-				return Message{}, fmt.Errorf("invalid content length: %w", err)
-			}
-			contentLength = n
+		if err := parseHeaderLine(line, &contentLength); err != nil {
+			return Message{}, err
 		}
 	}
 
@@ -115,6 +141,33 @@ func (r *Reader) readHeader() (Message, error) {
 		return Message{}, err
 	}
 	return msg, nil
+}
+
+func parseHeaderLine(line string, contentLength *int) error {
+	line = strings.TrimRight(line, "\r\n")
+	name, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return fmt.Errorf("invalid header line: %q", line)
+	}
+	if strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("invalid content length: %w", err)
+		}
+		*contentLength = n
+	}
+	return nil
+}
+
+func (r *Reader) Framing() Framing {
+	if r.jsonl {
+		return FramingJSONL
+	}
+	return FramingHeader
+}
+
+func (r *Reader) SeenFraming() bool {
+	return r.seen
 }
 
 type Writer struct {
