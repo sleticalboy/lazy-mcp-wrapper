@@ -27,6 +27,7 @@ type Options struct {
 	YesAll     bool
 	DryRun     bool
 	Now        time.Time
+	Exec       execFunc
 }
 
 type Plan struct {
@@ -80,10 +81,7 @@ func NewPlan(opts Options) (Plan, error) {
 	}
 
 	wrappable := map[string]RawServer{}
-	for _, adapter := range allAdapters(opts.Home) {
-		if !adapter.Installed() {
-			continue
-		}
+	for _, adapter := range scanClients(opts.Home) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %v", adapter.Kind(), err))
@@ -140,10 +138,7 @@ func NewPlan(opts Options) (Plan, error) {
 		Content:     daemonData,
 	}
 
-	for _, adapter := range allAdapters(opts.Home) {
-		if !adapter.Installed() {
-			continue
-		}
+	for _, adapter := range scanClients(opts.Home) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
 			continue
@@ -201,37 +196,45 @@ func (p Plan) Apply(opts Options) error {
 		return fmt.Errorf("setup has blockers: %s", strings.Join(p.Blockers, "; "))
 	}
 
-	if len(p.WrapperConfigs) > 0 && shouldApply(opts, "Create wrapper configs in "+filepath.Join(opts.Home, wrappersRel)+"?") {
+	if len(p.WrapperConfigs) > 0 && shouldApply(opts, "Step 1/3: Create wrapper configs in "+filepath.Join(opts.Home, wrappersRel)+"?") {
 		if err := writeWrapperConfigs(p.WrapperConfigs); err != nil {
 			return err
 		}
 	}
-	if shouldApply(opts, "Install daemon as macOS LaunchAgent?") {
+	if shouldApply(opts, "Step 2/3: Install daemon as macOS LaunchAgent?") {
 		if err := writeDaemonConfig(p.DaemonConfig); err != nil {
 			return err
 		}
-		if err := installLaunchAgent(p.LaunchAgent, realExec); err != nil {
+		if err := installLaunchAgent(p.LaunchAgent, opts.execFunc()); err != nil {
 			return err
 		}
 	}
-	if len(p.ClientUpdates) > 0 && shouldApply(opts, "Update client configs with backups?") {
+	if len(p.ClientUpdates) > 0 && shouldApply(opts, "Step 3/3: Update client configs with backups?") {
+		adaptersByKind := map[string]ClientAdapter{}
+		for _, adapter := range scanClients(opts.Home) {
+			adaptersByKind[adapter.Kind()] = adapter
+		}
 		for _, update := range p.ClientUpdates {
 			if err := os.MkdirAll(filepath.Dir(update.BackupPath), 0755); err != nil {
 				return err
 			}
-			original, err := os.ReadFile(update.ConfigPath)
-			if err != nil {
-				return err
+			adapter := adaptersByKind[update.Kind]
+			if adapter == nil {
+				return fmt.Errorf("adapter not found for %s", update.Kind)
 			}
-			if err := os.WriteFile(update.BackupPath, original, 0644); err != nil {
-				return err
-			}
-			if err := os.WriteFile(update.ConfigPath, update.NewContent, 0644); err != nil {
+			if err := adapter.WriteServers(update.Servers, update.BackupPath); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func (o Options) execFunc() execFunc {
+	if o.Exec != nil {
+		return o.Exec
+	}
+	return realExec
 }
 
 func normalizeOptions(opts Options) Options {

@@ -1,8 +1,10 @@
 package setup
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,5 +50,64 @@ args = ["@playwright/mcp@latest"]
 	}
 	if plan.DaemonConfig.SocketPath != filepath.Join(home, socketRel) {
 		t.Fatalf("socket path = %s", plan.DaemonConfig.SocketPath)
+	}
+}
+
+func TestPlanApplyWritesAllFilesAndBackups(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.context7]
+type = "stdio"
+command = "npx"
+args = ["-y","@upstash/context7-mcp"]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 2, 15, 30, 45, 0, time.UTC)
+	opts := Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+		YesAll:     true,
+		Now:        now,
+	}
+	opts.Exec = func(name string, args ...string) error { return nil }
+	plan, err := NewPlan(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.LaunchAgent.SocketPollAttempts = 0
+	if err := plan.Apply(opts); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(home, wrappersRel, "context7.json")); err != nil {
+		t.Fatalf("wrapper config missing: %v", err)
+	}
+	var daemonConfig struct {
+		Socket  string   `json:"socket"`
+		Configs []string `json:"configs"`
+	}
+	data, err := os.ReadFile(filepath.Join(home, daemonRel))
+	if err != nil {
+		t.Fatalf("daemon config missing: %v", err)
+	}
+	if err := json.Unmarshal(data, &daemonConfig); err != nil {
+		t.Fatalf("daemon config JSON: %v", err)
+	}
+	if len(daemonConfig.Configs) != 1 {
+		t.Fatalf("daemon configs = %#v", daemonConfig.Configs)
+	}
+	if _, err := os.Stat(plan.LaunchAgent.PlistPath); err != nil {
+		t.Fatalf("plist missing: %v", err)
+	}
+	if _, err := os.Stat(codexPath + ".bak-20260702153045"); err != nil {
+		t.Fatalf("backup missing: %v", err)
+	}
+	updated, _ := os.ReadFile(codexPath)
+	if !strings.Contains(string(updated), `/bin/lazy-mcp-wrapper`) {
+		t.Fatalf("client config not updated:\n%s", string(updated))
 	}
 }

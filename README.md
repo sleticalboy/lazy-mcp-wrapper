@@ -113,6 +113,25 @@ lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 
 `node_repl` is intentionally not a good fit for this wrapper because it keeps state between calls. Keep it configured directly unless you are fine with losing REPL state.
 
+## Automated Setup
+
+`setup` scans installed AI clients, creates wrapper configs, installs the macOS LaunchAgent, and updates client MCP configs with backups:
+
+```bash
+lazy-mcp-wrapper setup --dry-run
+lazy-mcp-wrapper setup
+lazy-mcp-wrapper setup --yes
+```
+
+Supported clients:
+
+- Codex: `~/.codex/config.toml`
+- Cursor: `~/.cursor/mcp.json`
+- Claude Code: `~/.claude/settings.json`
+- Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+The command wraps stdio MCP servers, keeps HTTP/SSE servers unchanged, skips `node_repl`, and uses `sharing: "session"` for Playwright.
+
 ## Shared Daemon Mode
 
 Multiple Codex CLI sessions can share stateless MCP servers through one daemon:

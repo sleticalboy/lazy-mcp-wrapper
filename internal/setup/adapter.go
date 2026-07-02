@@ -1,9 +1,6 @@
 package setup
 
-import (
-	"encoding/json"
-	"path/filepath"
-)
+import "encoding/json"
 
 type RawServer struct {
 	Name        string            `json:"name"`
@@ -32,9 +29,9 @@ type ClientInfo struct {
 
 func allAdapters(home string) []ClientAdapter {
 	return []ClientAdapter{
-		newCodexAdapter(filepath.Join(home, ".codex", "config.toml")),
-		newJSONAdapter("cursor", filepath.Join(home, ".cursor", "mcp.json")),
-		newJSONAdapter("claude-code", filepath.Join(home, ".claude", "settings.json")),
-		newJSONAdapter("claude-desktop", filepath.Join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")),
+		newCodexAdapter(home),
+		newCursorAdapter(home),
+		newClaudeCodeAdapter(home),
+		newClaudeDesktopAdapter(home),
 	}
 }

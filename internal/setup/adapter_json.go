@@ -78,6 +78,15 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 }
 
 func (a jsonAdapter) WriteServers(servers []RawServer, backupPath string) error {
+	if backupPath != "" {
+		data, err := os.ReadFile(a.path)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(backupPath, data, 0644); err != nil {
+			return err
+		}
+	}
 	content, err := renderJSONConfig(a.path, servers)
 	if err != nil {
 		return err

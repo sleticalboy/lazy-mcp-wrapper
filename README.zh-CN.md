@@ -264,6 +264,16 @@ logs:   ~/Library/Logs/lazy-mcp-wrapper
 
 安装脚本会把当前 `PATH` 写进 plist，确保 daemon 能找到 `npx`。
 
+也可以使用自动化 setup 一次性扫描并配置 Codex、Cursor、Claude Code 和 Claude Desktop：
+
+```bash
+lazy-mcp-wrapper setup --dry-run
+lazy-mcp-wrapper setup
+lazy-mcp-wrapper setup --yes
+```
+
+`setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它只包装 stdio MCP，HTTP/SSE 会原样保留，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。
+
 daemon 控制命令：
 
 ```bash

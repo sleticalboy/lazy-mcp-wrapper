@@ -41,6 +41,9 @@ func TestJSONAdapterReadWriteServers(t *testing.T) {
 	if err := adapter.WriteServers(servers, path+".bak"); err != nil {
 		t.Fatalf("WriteServers() error = %v", err)
 	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("backup missing: %v", err)
+	}
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), `"other": true`) || !strings.Contains(string(data), `/tmp/lazy-mcp-wrapper`) || !strings.Contains(string(data), `"url": "https://example.test/sse"`) || !strings.Contains(string(data), `"headers"`) {
 		t.Fatalf("updated JSON unexpected:\n%s", string(data))

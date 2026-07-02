@@ -1,13 +1,16 @@
 package setup
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 type codexAdapter struct {
 	path string
 }
 
-func newCodexAdapter(path string) ClientAdapter {
-	return codexAdapter{path: path}
+func newCodexAdapter(home string) ClientAdapter {
+	return codexAdapter{path: filepath.Join(home, ".codex", "config.toml")}
 }
 
 func (a codexAdapter) Kind() string {
@@ -35,6 +38,11 @@ func (a codexAdapter) WriteServers(servers []RawServer, backupPath string) error
 	data, err := os.ReadFile(a.path)
 	if err != nil {
 		return err
+	}
+	if backupPath != "" {
+		if err := os.WriteFile(backupPath, data, 0644); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(a.path, replaceTOMLMCPServers(data, servers), 0644)
 }

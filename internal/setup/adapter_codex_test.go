@@ -8,7 +8,11 @@ import (
 )
 
 func TestCodexAdapterReadWriteServers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
+	home := t.TempDir()
+	path := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(`[mcp_servers.context7]
 type = "stdio"
 command = "npx"
@@ -17,7 +21,7 @@ args = ["-y","@upstash/context7-mcp"]
 		t.Fatalf("write config: %v", err)
 	}
 
-	adapter := newCodexAdapter(path)
+	adapter := newCodexAdapter(home)
 	servers, err := adapter.ReadServers()
 	if err != nil {
 		t.Fatalf("ReadServers() error = %v", err)
@@ -30,6 +34,9 @@ args = ["-y","@upstash/context7-mcp"]
 	servers[0].Args = []string{"client", "--socket", "/tmp/sock", "--name", "context7"}
 	if err := adapter.WriteServers(servers, path+".bak"); err != nil {
 		t.Fatalf("WriteServers() error = %v", err)
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("backup missing: %v", err)
 	}
 	data, _ := os.ReadFile(path)
 	if !strings.Contains(string(data), `/tmp/lazy-mcp-wrapper`) {
