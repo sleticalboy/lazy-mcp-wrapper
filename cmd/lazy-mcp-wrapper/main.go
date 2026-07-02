@@ -265,13 +265,13 @@ func printStatusTable(out io.Writer, status daemon.Status) {
 	}
 	fmt.Fprintln(out, "\nActive clients:")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tMCP\tGEN\tCONNECTED\tREMOTE")
+	fmt.Fprintln(tw, "ID\tMCP\tSHARE\tGEN\tCONNECTED\tREMOTE")
 	for _, client := range status.ActiveClients {
 		remote := client.RemoteAddr
 		if remote == "" {
 			remote = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", client.ID, client.Name, client.Generation, formatTime(client.ConnectedAt), remote)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", client.ID, client.Name, client.Sharing, client.Generation, formatTime(client.ConnectedAt), remote)
 	}
 	_ = tw.Flush()
 }

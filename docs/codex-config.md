@@ -97,9 +97,9 @@ args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/configs.loc
 
 Do not wrap `node_repl` for now. It keeps REPL state between calls, so lazy shutdown would lose state and break browser/plugin workflows.
 
-## Shared Daemon Phase 1
+## Shared Daemon Mode
 
-Use this mode when multiple Codex CLI sessions should share stateless MCP servers.
+Use this mode when multiple Codex CLI sessions should share one local MCP management daemon. Stateless MCPs use `sharing: "shared"`; stateful MCPs such as Playwright use `sharing: "session"` so each client connection gets its own real MCP process.
 
 Start the daemon first:
 
@@ -107,6 +107,7 @@ Start the daemon first:
 /Users/binlee/.local/bin/lazy-mcp-wrapper daemon \
   --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock \
   --config /Users/binlee/code/open-source/lazy-mcp-wrapper/examples/context7.json \
+  --config /Users/binlee/code/open-source/lazy-mcp-wrapper/examples/playwright.json \
   --config /Users/binlee/code/open-source/lazy-mcp-wrapper/configs.local/mastergo-magic-mcp.json
 ```
 
@@ -132,10 +133,8 @@ args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", 
 [mcp_servers.playwright]
 type = "stdio"
 command = "/Users/binlee/.local/bin/lazy-mcp-wrapper"
-args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/playwright.json"]
+args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "playwright"]
 ```
-
-Keep Playwright in direct lazy wrapper mode for now. A shared Playwright instance can leak browser state across Codex sessions.
 
 On macOS, install the daemon as a user LaunchAgent:
 
@@ -193,6 +192,7 @@ Local smoke commands:
 cd /Users/binlee/code/open-source/lazy-mcp-wrapper
 ./scripts/smoke.sh
 make smoke-shared-daemon
+make smoke-playwright-session
 ```
 
 ## Rollback

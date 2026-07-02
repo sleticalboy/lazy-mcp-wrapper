@@ -186,12 +186,10 @@ args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/configs.loc
 -> daemon 统一按需启动真实 MCP
 ```
 
-第一阶段建议只共享无状态或只读 MCP，例如：
+共享 daemon 当前支持两类策略：
 
-- `context7`
-- `mastergo-magic-mcp`
-
-`playwright` 暂时不建议共享真实实例，因为它涉及浏览器页面、登录态和会话上下文，容易互相污染。
+- `shared`：适合无状态或只读 MCP，例如 `context7`、`mastergo-magic-mcp`。
+- `session`：适合有会话状态的 MCP，例如 `playwright`。多个 Codex 会话共享 daemon 入口，但每个 client connection 单独启动真实 MCP，避免浏览器页面、登录态和上下文互相污染。
 
 启动 daemon：
 
@@ -209,6 +207,7 @@ lazy-mcp-wrapper daemon \
   "socket": "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock",
   "configs": [
     "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/context7.json",
+    "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/playwright.json",
     "/Users/binlee/code/open-source/lazy-mcp-wrapper/configs.local/mastergo-magic-mcp.json"
   ]
 }
@@ -232,15 +231,11 @@ args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", 
 type = "stdio"
 command = "/Users/binlee/.local/bin/lazy-mcp-wrapper"
 args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "mastergo-magic-mcp"]
-```
 
-`playwright` 保持普通 wrapper 模式：
-
-```toml
 [mcp_servers.playwright]
 type = "stdio"
 command = "/Users/binlee/.local/bin/lazy-mcp-wrapper"
-args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/playwright.json"]
+args = ["client", "--socket", "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "playwright"]
 ```
 
 当前 daemon 不会自动后台启动。如果 Codex client 连接不到 daemon，会直接报错退出，避免静默 fallback 导致排查困难。

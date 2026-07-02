@@ -3,7 +3,7 @@ PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 GOCACHE ?= /private/tmp/lazy-mcp-wrapper-gocache
 
-.PHONY: build test smoke smoke-shared-daemon install install-agent uninstall-agent clean
+.PHONY: build test smoke smoke-shared-daemon smoke-playwright-session install install-agent uninstall-agent clean
 
 build:
 	GOCACHE=$(GOCACHE) go build -o bin/$(BINARY) ./cmd/lazy-mcp-wrapper
@@ -16,6 +16,9 @@ smoke: build
 
 smoke-shared-daemon: build
 	./scripts/smoke-shared-daemon.sh
+
+smoke-playwright-session: build
+	./scripts/smoke-playwright-session.sh
 
 install: build
 	install -d $(BINDIR)

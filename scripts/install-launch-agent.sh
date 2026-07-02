@@ -8,6 +8,7 @@ SOCKET="${SOCKET:-${HOME}/.lazy-mcp-wrapper/lazy-mcpd.sock}"
 DAEMON_CONFIG="${DAEMON_CONFIG:-${HOME}/.lazy-mcp-wrapper/config.json}"
 BIN="${BIN:-${HOME}/.local/bin/lazy-mcp-wrapper}"
 CONTEXT7_CONFIG="${CONTEXT7_CONFIG:-${ROOT_DIR}/examples/context7.json}"
+PLAYWRIGHT_CONFIG="${PLAYWRIGHT_CONFIG:-${ROOT_DIR}/examples/playwright.json}"
 MASTERGO_CONFIG="${MASTERGO_CONFIG:-${ROOT_DIR}/configs.local/mastergo-magic-mcp.json}"
 LOG_DIR="${LOG_DIR:-${HOME}/Library/Logs/lazy-mcp-wrapper}"
 PATH_VALUE="${PATH_VALUE:-${PATH}}"
@@ -18,6 +19,10 @@ if [[ ! -x "${BIN}" ]]; then
 fi
 if [[ ! -f "${CONTEXT7_CONFIG}" ]]; then
   echo "context7 config not found: ${CONTEXT7_CONFIG}" >&2
+  exit 1
+fi
+if [[ ! -f "${PLAYWRIGHT_CONFIG}" ]]; then
+  echo "playwright config not found: ${PLAYWRIGHT_CONFIG}" >&2
   exit 1
 fi
 if [[ ! -f "${MASTERGO_CONFIG}" ]]; then
@@ -36,6 +41,7 @@ cat > "${DAEMON_CONFIG}" <<EOF
   "socket": "${SOCKET}",
   "configs": [
     "${CONTEXT7_CONFIG}",
+    "${PLAYWRIGHT_CONFIG}",
     "${MASTERGO_CONFIG}"
   ]
 }

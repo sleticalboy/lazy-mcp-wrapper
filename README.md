@@ -131,6 +131,7 @@ Or use a daemon config file:
   "socket": "/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock",
   "configs": [
     "./examples/context7.json",
+    "./examples/playwright.json",
     "./configs.local/mastergo-magic-mcp.json"
   ]
 }
@@ -149,7 +150,7 @@ command = "/Users/you/.local/bin/lazy-mcp-wrapper"
 args = ["client", "--socket", "/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock", "--name", "context7"]
 ```
 
-Phase 1 is intended for stateless or read-only MCP servers such as Context7 and MasterGo. Keep Playwright in direct lazy wrapper mode until session isolation is implemented.
+Use `sharing: "shared"` for stateless or read-only MCP servers such as Context7 and MasterGo. Use `sharing: "session"` for stateful MCP servers such as Playwright; Codex sessions share the daemon entrypoint, while each client connection gets its own real MCP process.
 
 On macOS, install the shared daemon as a user LaunchAgent:
 
@@ -206,6 +207,12 @@ Run the shared daemon smoke test with a local fake MCP:
 
 ```bash
 make smoke-shared-daemon
+```
+
+Run the real Playwright daemon session smoke test:
+
+```bash
+make smoke-playwright-session
 ```
 
 The MasterGo smoke uses `configs.local/mastergo-magic-mcp.json` when present, because the committed example intentionally contains no real token. Its tool call allows a validation error result because MasterGo design tools require a real `fileId`/`layerId`; that still verifies the wrapper can initialize the real MCP and forward `tools/call`.

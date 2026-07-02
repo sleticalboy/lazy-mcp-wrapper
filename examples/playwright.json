@@ -1,5 +1,6 @@
 {
   "name": "playwright",
+  "sharing": "session",
   "command": "npx",
   "args": ["@playwright/mcp@latest"],
   "real_protocol_version": "2024-11-05",

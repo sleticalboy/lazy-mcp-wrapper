@@ -55,6 +55,12 @@ shared daemon 当前适合无状态或只读 MCP，例如 `context7` 和 `master
 - `--graceful` 后，新 session 使用新配置创建 proxy。
 - 旧 session 断开时自然关闭自己的 proxy。
 
-## 后续
+## 验证
 
-下一阶段再把 Playwright 示例配置切到 `sharing: "session"`，并补真实 Playwright smoke。真实 Playwright 的验证要额外关注浏览器上下文、页面状态和登录态隔离。
+Playwright 示例配置已切到 `sharing: "session"`。真实 Playwright daemon session smoke：
+
+```bash
+make smoke-playwright-session
+```
+
+真实 Playwright 的验证重点是浏览器上下文、页面状态和登录态隔离。
