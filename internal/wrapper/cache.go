@@ -163,10 +163,11 @@ func RefreshToolsCache(ctx context.Context, cfg Config, logger *log.Logger) (Cac
 	}
 	defer client.close()
 
-	resp, err := client.call(ctx, "tools/list", mustRaw(map[string]any{}))
+	resp, release, err := client.call(ctx, "tools/list", mustRaw(map[string]any{}))
 	if err != nil {
 		return cfg.CacheInfo(), err
 	}
+	release()
 	if resp.Error != nil {
 		return cfg.CacheInfo(), fmt.Errorf("tools/list failed: %s", resp.Error.Message)
 	}

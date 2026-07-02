@@ -7,6 +7,7 @@ import (
 )
 
 func main() {
+	notifyToolsChanged := len(os.Args) > 1 && os.Args[1] == "--notify-tools-changed"
 	reader := jsonrpc.NewReader(os.Stdin)
 	writer := jsonrpc.NewWriter(os.Stdout)
 
@@ -41,6 +42,12 @@ func main() {
 					},
 				},
 			}))
+			if notifyToolsChanged {
+				_ = writer.Write(jsonrpc.Message{
+					JSONRPC: "2.0",
+					Method:  "notifications/tools/list_changed",
+				})
+			}
 		case "tools/call":
 			_ = writer.Write(jsonrpc.Response(msg.ID, map[string]any{
 				"content": []map[string]any{

@@ -57,7 +57,32 @@ func NewProxyWithOptions(cfg Config, logger *log.Logger, opts ProxyOptions) *Pro
 
 func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 	reader := jsonrpc.NewReader(in)
-	writer := jsonrpc.NewWriter(out)
+	writer := newLockedWriter(out)
+	notifUpdates := make(chan chan jsonrpc.Message, 4)
+	notifDone := make(chan struct{})
+	go p.notifForwarder(writer, notifUpdates, notifDone)
+
+	var currentClient *realClient
+	var currentSub chan jsonrpc.Message
+	syncSubscription := func(client *realClient) {
+		if client == nil || client == currentClient {
+			return
+		}
+		if currentClient != nil && currentSub != nil {
+			currentClient.unsubscribe(currentSub)
+		}
+		currentClient = client
+		currentSub = client.subscribe()
+		notifUpdates <- currentSub
+	}
+	cleanup := func() {
+		close(notifUpdates)
+		<-notifDone
+		if currentClient != nil && currentSub != nil {
+			currentClient.unsubscribe(currentSub)
+		}
+	}
+	defer cleanup()
 
 	for {
 		msg, err := reader.Read()
@@ -73,14 +98,14 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 		}
 
 		if msg.IsNotification() {
-			if err := p.handleNotification(ctx, msg); err != nil {
+			if err := p.handleNotification(ctx, msg, syncSubscription); err != nil {
 				p.log.Printf("notification %s failed: %v", msg.Method, err)
 			}
 			continue
 		}
 		if !msg.IsRequest() {
 			if reader.SeenFraming() {
-				writer = jsonrpc.NewWriterWithFraming(out, reader.Framing())
+				writer.upgradeFraming(out, reader.Framing())
 			}
 			_ = writer.Write(jsonrpc.ErrorResponse(msg.ID, errInvalidReq, "invalid JSON-RPC message"))
 			continue
@@ -89,8 +114,9 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 		if p.opts.OnRequest != nil {
 			p.opts.OnRequest(msg.Method)
 		}
+		var afterWrite func()
 		start := time.Now()
-		resp := p.handleRequest(ctx, msg)
+		resp := p.handleRequest(ctx, msg, syncSubscription, &afterWrite)
 		if p.opts.OnResponse != nil {
 			errorMessage := ""
 			if resp.Error != nil {
@@ -99,18 +125,76 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 			p.opts.OnResponse(msg.Method, time.Since(start), resp.Error != nil, errorMessage)
 		}
 		if reader.SeenFraming() {
-			writer = jsonrpc.NewWriterWithFraming(out, reader.Framing())
+			writer.upgradeFraming(out, reader.Framing())
 		}
 		if err := writer.Write(resp); err != nil {
+			if afterWrite != nil {
+				afterWrite()
+			}
 			if !p.opts.KeepRealOnClientClose {
 				p.stopReal()
 			}
 			return err
 		}
+		if afterWrite != nil {
+			afterWrite()
+		}
 	}
 }
 
-func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message) jsonrpc.Message {
+type lockedWriter struct {
+	mu sync.Mutex
+	w  *jsonrpc.Writer
+}
+
+func newLockedWriter(out io.Writer) *lockedWriter {
+	return &lockedWriter{w: jsonrpc.NewWriter(out)}
+}
+
+func (lw *lockedWriter) Write(msg jsonrpc.Message) error {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(msg)
+}
+
+func (lw *lockedWriter) upgradeFraming(out io.Writer, framing jsonrpc.Framing) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	lw.w = jsonrpc.NewWriterWithFraming(out, framing)
+}
+
+func (p *Proxy) notifForwarder(writer *lockedWriter, updates <-chan chan jsonrpc.Message, done chan<- struct{}) {
+	defer close(done)
+	var current chan jsonrpc.Message
+	for {
+		if current == nil {
+			ch, ok := <-updates
+			if !ok {
+				return
+			}
+			current = ch
+			continue
+		}
+
+		select {
+		case ch, ok := <-updates:
+			if !ok {
+				return
+			}
+			current = ch
+		case msg, ok := <-current:
+			if !ok {
+				current = nil
+				continue
+			}
+			if err := writer.Write(msg); err != nil {
+				p.log.Printf("forward server notification failed method=%s error=%v", msg.Method, err)
+			}
+		}
+	}
+}
+
+func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient), afterWrite *func()) jsonrpc.Message {
 	switch msg.Method {
 	case "initialize":
 		p.captureInitialize(msg.Params)
@@ -129,9 +213,9 @@ func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message) jsonrpc.
 	case "ping":
 		return jsonrpc.Response(msg.ID, map[string]any{})
 	case "tools/list":
-		return p.toolsList(ctx, msg)
+		return p.toolsList(ctx, msg, onRealClient, afterWrite)
 	case "tools/call", "prompts/list", "prompts/get", "resources/list", "resources/read", "resources/templates/list":
-		return p.forward(ctx, msg)
+		return p.forward(ctx, msg, onRealClient, afterWrite)
 	case "notifications/initialized", "notifications/cancelled":
 		return jsonrpc.Response(msg.ID, map[string]any{})
 	default:
@@ -139,14 +223,14 @@ func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message) jsonrpc.
 	}
 }
 
-func (p *Proxy) toolsList(ctx context.Context, msg jsonrpc.Message) jsonrpc.Message {
+func (p *Proxy) toolsList(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient), afterWrite *func()) jsonrpc.Message {
 	if cached, ok := p.cfg.readCachedToolsList(); ok {
 		cached.ID = msg.ID
 		p.log.Printf("tools/list cache hit name=%s", p.cfg.Name)
 		return cached
 	}
 
-	resp := p.forward(ctx, msg)
+	resp := p.forward(ctx, msg, onRealClient, afterWrite)
 	if resp.Error == nil && len(resp.Result) > 0 {
 		if err := p.cfg.writeCachedToolsList(resp.Result); err != nil {
 			p.log.Printf("tools/list cache write failed name=%s error=%v", p.cfg.Name, err)
@@ -182,7 +266,7 @@ func (p *Proxy) protocolVersion() string {
 	return "2024-11-05"
 }
 
-func (p *Proxy) handleNotification(ctx context.Context, msg jsonrpc.Message) error {
+func (p *Proxy) handleNotification(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient)) error {
 	switch msg.Method {
 	case "notifications/initialized", "notifications/cancelled":
 		return nil
@@ -191,23 +275,26 @@ func (p *Proxy) handleNotification(ctx context.Context, msg jsonrpc.Message) err
 		if err != nil {
 			return err
 		}
+		onRealClient(client)
 		return client.sendNotification(msg)
 	}
 }
 
-func (p *Proxy) forward(ctx context.Context, msg jsonrpc.Message) jsonrpc.Message {
+func (p *Proxy) forward(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient), afterWrite *func()) jsonrpc.Message {
 	client, err := p.ensureReal(ctx)
 	if err != nil {
 		return jsonrpc.ErrorResponse(msg.ID, errInternal, err.Error())
 	}
+	onRealClient(client)
 
 	callCtx, cancel := context.WithTimeout(ctx, p.cfg.CallTimeout.Duration)
 	defer cancel()
 
-	resp, err := client.call(callCtx, msg.Method, msg.Params)
+	resp, release, err := client.call(callCtx, msg.Method, msg.Params)
 	if err != nil {
 		return jsonrpc.ErrorResponse(msg.ID, errInternal, err.Error())
 	}
+	*afterWrite = release
 	resp.ID = msg.ID
 	if resp.JSONRPC == "" {
 		resp.JSONRPC = "2.0"
@@ -288,13 +375,20 @@ type realClient struct {
 	cmd       *exec.Cmd
 	writer    *jsonrpc.Writer
 	framing   jsonrpc.Framing
-	responses chan jsonrpc.Message
+	responses chan realResponse
 	done      chan struct{}
 	callMu    sync.Mutex
 	mu        sync.Mutex
 	nextID    int64
 	timer     *time.Timer
 	lastUsed  time.Time
+	subsMu    sync.Mutex
+	subs      []chan jsonrpc.Message
+}
+
+type realResponse struct {
+	msg jsonrpc.Message
+	ack chan struct{}
 }
 
 type initRequest struct {
@@ -342,7 +436,7 @@ func startReal(ctx context.Context, cfg Config, logger *log.Logger, init initReq
 		cmd:       cmd,
 		writer:    jsonrpc.NewWriterWithFraming(stdin, framing),
 		framing:   framing,
-		responses: make(chan jsonrpc.Message, 64),
+		responses: make(chan realResponse, 64),
 		done:      make(chan struct{}),
 	}
 
@@ -377,9 +471,11 @@ func (c *realClient) initialize(ctx context.Context, init initRequest) error {
 		"capabilities":    init.Capabilities,
 	}
 	c.log.Printf("sending initialize to real MCP %s protocol=%s", c.cfg.Name, init.ProtocolVersion)
-	if _, err := c.call(ctx, "initialize", mustRaw(params)); err != nil {
+	_, release, err := c.call(ctx, "initialize", mustRaw(params))
+	if err != nil {
 		return err
 	}
+	release()
 	c.log.Printf("initialize completed for real MCP %s", c.cfg.Name)
 	return c.sendNotification(jsonrpc.Message{
 		JSONRPC: "2.0",
@@ -387,7 +483,7 @@ func (c *realClient) initialize(ctx context.Context, init initRequest) error {
 	})
 }
 
-func (c *realClient) call(ctx context.Context, method string, params json.RawMessage) (jsonrpc.Message, error) {
+func (c *realClient) call(ctx context.Context, method string, params json.RawMessage) (jsonrpc.Message, func(), error) {
 	c.callMu.Lock()
 	defer c.callMu.Unlock()
 
@@ -409,21 +505,23 @@ func (c *realClient) call(ctx context.Context, method string, params json.RawMes
 
 	c.log.Printf("calling real MCP %s method=%s id=%d", c.cfg.Name, method, id)
 	if err := c.writer.Write(req); err != nil {
-		return jsonrpc.Message{}, err
+		return jsonrpc.Message{}, nil, err
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return jsonrpc.Message{}, ctx.Err()
+			return jsonrpc.Message{}, nil, ctx.Err()
 		case <-c.done:
-			return jsonrpc.Message{}, fmt.Errorf("real MCP exited")
-		case resp := <-c.responses:
+			return jsonrpc.Message{}, nil, fmt.Errorf("real MCP exited")
+		case realResp := <-c.responses:
+			resp := realResp.msg
 			if string(resp.ID) == string(idRaw) {
 				c.touch()
 				c.log.Printf("real MCP %s responded method=%s id=%d has_error=%v", c.cfg.Name, method, id, resp.Error != nil)
-				return resp, nil
+				return resp, func() { close(realResp.ack) }, nil
 			}
+			close(realResp.ack)
 			c.log.Printf("dropping unmatched response id=%s", string(resp.ID))
 		}
 	}
@@ -446,14 +544,64 @@ func (c *realClient) readLoop(stdout io.Reader) {
 			c.log.Printf("real read loop stopped: %v", err)
 			return
 		}
-		if msg.IsNotification() || msg.IsRequest() {
-			c.log.Printf("ignoring real server-initiated method=%s", msg.Method)
+		if msg.IsRequest() {
+			c.log.Printf("warning: ignoring server-initiated request method=%s id=%s", msg.Method, string(msg.ID))
 			continue
 		}
+		if msg.IsNotification() {
+			c.broadcastNotification(msg)
+			continue
+		}
+		ack := make(chan struct{})
 		select {
-		case c.responses <- msg:
+		case c.responses <- realResponse{msg: msg, ack: ack}:
+			select {
+			case <-ack:
+			case <-c.done:
+				return
+			case <-time.After(5 * time.Second):
+				c.log.Printf("warning: timed out waiting for response write ack id=%s", string(msg.ID))
+			}
 		case <-c.done:
 			return
+		}
+	}
+}
+
+func (c *realClient) subscribe() chan jsonrpc.Message {
+	ch := make(chan jsonrpc.Message, 16)
+	c.subsMu.Lock()
+	c.subs = append(c.subs, ch)
+	c.subsMu.Unlock()
+	return ch
+}
+
+func (c *realClient) unsubscribe(ch chan jsonrpc.Message) {
+	c.subsMu.Lock()
+	defer c.subsMu.Unlock()
+	for i, sub := range c.subs {
+		if sub != ch {
+			continue
+		}
+		c.subs = append(c.subs[:i], c.subs[i+1:]...)
+		close(ch)
+		return
+	}
+}
+
+func (c *realClient) broadcastNotification(msg jsonrpc.Message) {
+	if msg.JSONRPC == "" {
+		msg.JSONRPC = "2.0"
+	}
+	msg.ID = nil
+
+	c.subsMu.Lock()
+	defer c.subsMu.Unlock()
+	for _, sub := range c.subs {
+		select {
+		case sub <- msg:
+		default:
+			c.log.Printf("dropping server notification for slow subscriber method=%s", msg.Method)
 		}
 	}
 }
