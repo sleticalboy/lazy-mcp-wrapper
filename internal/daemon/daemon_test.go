@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -235,6 +237,80 @@ func TestTotalCallsCountsJSONRPCRequests(t *testing.T) {
 	}
 	if status.Servers[0].LastCallAt == nil {
 		t.Fatalf("last call at is nil")
+	}
+	if status.Servers[0].LastLatencyMS <= 0 {
+		t.Fatalf("last latency ms = %d, want positive", status.Servers[0].LastLatencyMS)
+	}
+	if status.Servers[0].AvgLatencyMS <= 0 {
+		t.Fatalf("avg latency ms = %d, want positive", status.Servers[0].AvgLatencyMS)
+	}
+	if status.Servers[0].MaxLatencyMS <= 0 {
+		t.Fatalf("max latency ms = %d, want positive", status.Servers[0].MaxLatencyMS)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+func TestStatusReportsActiveClients(t *testing.T) {
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+	cfg := wrapper.Config{Name: "fake", Command: "fake"}
+
+	server, err := NewServer(socketPath, []wrapper.Config{cfg}, nil)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial socket: %v", err)
+	}
+	defer conn.Close()
+	bind, _ := json.Marshal(BindRequest{Name: "fake"})
+	if _, err := conn.Write(append(bind, '\n')); err != nil {
+		t.Fatalf("write bind: %v", err)
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read bind response: %v", err)
+	}
+	var bindResp BindResponse
+	if err := json.Unmarshal(line, &bindResp); err != nil {
+		t.Fatalf("decode bind response: %v", err)
+	}
+	if !bindResp.OK {
+		t.Fatalf("bind response = %#v, want ok", bindResp)
+	}
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if status.Clients != 1 {
+		t.Fatalf("clients = %d, want 1", status.Clients)
+	}
+	if len(status.ActiveClients) != 1 {
+		t.Fatalf("active clients = %#v, want one", status.ActiveClients)
+	}
+	if status.ActiveClients[0].ID == "" {
+		t.Fatalf("active client id is empty")
+	}
+	if status.ActiveClients[0].Name != "fake" {
+		t.Fatalf("active client name = %q, want fake", status.ActiveClients[0].Name)
+	}
+	if status.ActiveClients[0].ConnectedAt.IsZero() {
+		t.Fatalf("active client connected_at is zero")
 	}
 
 	cancel()

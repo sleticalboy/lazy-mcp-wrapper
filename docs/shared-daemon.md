@@ -159,6 +159,7 @@ lazy-mcp-wrapper status \
 - daemon 配置路径。
 - daemon 启动时间和运行时长。
 - 当前连接 client 数。
+- 活跃 client session 列表，包括 client id、MCP name 和连接时间。
 - 已转发调用数。
 - 最近错误。
 - 已注册 MCP 名称。
@@ -167,6 +168,7 @@ lazy-mcp-wrapper status \
 - 最近使用时间。
 - MCP 请求数和错误数。
 - MCP 最近方法、最近错误和最近 reload 时间。
+- MCP 最近、平均和最大延迟。
 
 停止 daemon：
 
@@ -290,7 +292,7 @@ make uninstall-agent
 
 第二阶段可以考虑：
 
-- client id。
-- MCP 级别延迟统计。
+- status table 输出。
+- reload 安全策略：busy 检测或 graceful reload。
 - Playwright session 隔离。
 - 与其他 MCP 客户端共享，不局限于 Codex。

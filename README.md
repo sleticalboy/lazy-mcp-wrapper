@@ -100,7 +100,7 @@ lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-`status` includes daemon config path, daemon pid, start time, uptime, active clients, forwarded calls, last error, and per-MCP metrics such as calls, errors, last method, and last error.
+`status` includes daemon config path, daemon pid, start time, uptime, active client sessions, forwarded calls, last error, and per-MCP metrics such as calls, errors, last method, last error, and latency.
 
 `reload` hot-reloads the daemon config only when the daemon was started with `--daemon-config`. Manual `daemon --config ...` mode has no reload source and returns an explicit error.
 

@@ -32,13 +32,24 @@ type Status struct {
 	Clients          int64          `json:"clients"`
 	TotalCalls       int64          `json:"total_calls"`
 	LastError        string         `json:"last_error,omitempty"`
+	ActiveClients    []ClientStatus `json:"active_clients,omitempty"`
 	Servers          []ServerStatus `json:"servers"`
+}
+
+type ClientStatus struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	ConnectedAt time.Time `json:"connected_at"`
+	RemoteAddr  string    `json:"remote_addr,omitempty"`
 }
 
 type ServerStatus struct {
 	wrapper.ProxyStatus
 	Calls          int64      `json:"calls"`
 	Errors         int64      `json:"errors"`
+	LastLatencyMS  int64      `json:"last_latency_ms,omitempty"`
+	AvgLatencyMS   int64      `json:"avg_latency_ms,omitempty"`
+	MaxLatencyMS   int64      `json:"max_latency_ms,omitempty"`
 	LastMethod     string     `json:"last_method,omitempty"`
 	LastCallAt     *time.Time `json:"last_call_at,omitempty"`
 	LastError      string     `json:"last_error,omitempty"`
@@ -59,9 +70,11 @@ type Server struct {
 	loggers          map[string]*log.Logger
 	closers          map[string]io.Closer
 	stats            map[string]*proxyStats
+	activeClients    map[string]ClientStatus
 	startedAt        time.Time
 	cancel           context.CancelFunc
 	clients          atomic.Int64
+	nextClientID     atomic.Uint64
 	totalCalls       atomic.Int64
 	lastError        string
 	mu               sync.Mutex
@@ -70,12 +83,15 @@ type Server struct {
 type proxyStats struct {
 	calls          atomic.Int64
 	errors         atomic.Int64
+	totalLatencyNS atomic.Int64
+	maxLatencyNS   atomic.Int64
 	lastReloadedAt time.Time
 	mu             sync.Mutex
 	lastMethod     string
 	lastCallAt     time.Time
 	lastError      string
 	lastErrorAt    time.Time
+	lastLatency    time.Duration
 }
 
 func NewServer(socketPath string, configs []wrapper.Config, loggers map[string]*log.Logger) (*Server, error) {
@@ -87,12 +103,13 @@ func NewServer(socketPath string, configs []wrapper.Config, loggers map[string]*
 	}
 
 	server := &Server{
-		socketPath: socketPath,
-		proxies:    make(map[string]*wrapper.Proxy, len(configs)),
-		loggers:    make(map[string]*log.Logger, len(configs)),
-		closers:    map[string]io.Closer{},
-		stats:      make(map[string]*proxyStats, len(configs)),
-		startedAt:  time.Now(),
+		socketPath:    socketPath,
+		proxies:       make(map[string]*wrapper.Proxy, len(configs)),
+		loggers:       make(map[string]*log.Logger, len(configs)),
+		closers:       map[string]io.Closer{},
+		stats:         make(map[string]*proxyStats, len(configs)),
+		activeClients: make(map[string]ClientStatus),
+		startedAt:     time.Now(),
 	}
 	for _, cfg := range configs {
 		var logger *log.Logger
@@ -126,6 +143,7 @@ func NewServerFromConfig(path string) (*Server, error) {
 		loggers:          make(map[string]*log.Logger, len(cfg.ConfigPaths)),
 		closers:          make(map[string]io.Closer, len(cfg.ConfigPaths)),
 		stats:            make(map[string]*proxyStats, len(cfg.ConfigPaths)),
+		activeClients:    make(map[string]ClientStatus),
 		startedAt:        time.Now(),
 	}
 	if err := server.reloadFromConfigLocked(time.Time{}); err != nil {
@@ -169,13 +187,17 @@ func (s *Server) buildProxy(cfg wrapper.Config, logger *log.Logger, reloadedAt t
 			stats.recordCall(method)
 			logger.Printf("client request name=%s method=%s", name, method)
 		},
-		OnResponse: func(method string, hasError bool, errorMessage string) {
-			if !hasError {
+		OnResponse: func(method string, duration time.Duration, hasError bool, errorMessage string) {
+			if method != "initialize" && method != "ping" {
+				stats.recordLatency(duration)
+			}
+			if hasError {
+				stats.recordError(method, errorMessage)
+				s.setLastError(fmt.Errorf("%s %s: %s", name, method, errorMessage))
+				logger.Printf("client response error name=%s method=%s latency=%s error=%s", name, method, duration, errorMessage)
 				return
 			}
-			stats.recordError(method, errorMessage)
-			s.setLastError(fmt.Errorf("%s %s: %s", name, method, errorMessage))
-			logger.Printf("client response error name=%s method=%s error=%s", name, method, errorMessage)
+			logger.Printf("client response name=%s method=%s latency=%s", name, method, duration)
 		},
 	})
 	return proxy, stats
@@ -263,11 +285,29 @@ func (s *proxyStats) recordError(method, message string) {
 	s.lastErrorAt = now
 }
 
-func (s *proxyStats) status() (calls int64, errors int64, lastMethod string, lastCallAt *time.Time, lastError string, lastErrorAt *time.Time, lastReloadedAt *time.Time) {
-	calls = s.calls.Load()
-	errors = s.errors.Load()
+func (s *proxyStats) recordLatency(duration time.Duration) {
+	s.totalLatencyNS.Add(duration.Nanoseconds())
+	for {
+		current := s.maxLatencyNS.Load()
+		if duration.Nanoseconds() <= current || s.maxLatencyNS.CompareAndSwap(current, duration.Nanoseconds()) {
+			break
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.lastLatency = duration
+}
+
+func (s *proxyStats) status() (calls int64, errors int64, lastLatencyMS int64, avgLatencyMS int64, maxLatencyMS int64, lastMethod string, lastCallAt *time.Time, lastError string, lastErrorAt *time.Time, lastReloadedAt *time.Time) {
+	calls = s.calls.Load()
+	errors = s.errors.Load()
+	if calls > 0 {
+		avgLatencyMS = durationMillis(time.Duration(s.totalLatencyNS.Load() / calls))
+	}
+	maxLatencyMS = durationMillis(time.Duration(s.maxLatencyNS.Load()))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lastLatencyMS = durationMillis(s.lastLatency)
 	lastMethod = s.lastMethod
 	if !s.lastCallAt.IsZero() {
 		value := s.lastCallAt
@@ -282,7 +322,18 @@ func (s *proxyStats) status() (calls int64, errors int64, lastMethod string, las
 		value := s.lastReloadedAt
 		lastReloadedAt = &value
 	}
-	return calls, errors, lastMethod, lastCallAt, lastError, lastErrorAt, lastReloadedAt
+	return calls, errors, lastLatencyMS, avgLatencyMS, maxLatencyMS, lastMethod, lastCallAt, lastError, lastErrorAt, lastReloadedAt
+}
+
+func durationMillis(d time.Duration) int64 {
+	if d <= 0 {
+		return 0
+	}
+	ms := d.Milliseconds()
+	if ms == 0 {
+		return 1
+	}
+	return ms
 }
 
 func (s *Server) Serve(ctx context.Context) error {
@@ -365,9 +416,11 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	_ = writeBindOK(conn)
 	s.clients.Add(1)
 	defer s.clients.Add(-1)
+	client := s.registerClient(bind.Name, conn.RemoteAddr().String())
+	defer s.unregisterClient(client.ID)
 	logger := s.logger(bind.Name)
-	logger.Printf("client connected name=%s", bind.Name)
-	defer logger.Printf("client disconnected name=%s", bind.Name)
+	logger.Printf("client connected id=%s name=%s remote=%s", client.ID, bind.Name, client.RemoteAddr)
+	defer logger.Printf("client disconnected id=%s name=%s", client.ID, bind.Name)
 
 	stream := &boundConn{
 		Reader: reader,
@@ -400,11 +453,38 @@ func (s *Server) logger(name string) *log.Logger {
 	return log.New(io.Discard, "", 0)
 }
 
+func (s *Server) registerClient(name, remoteAddr string) ClientStatus {
+	id := fmt.Sprintf("client-%d", s.nextClientID.Add(1))
+	client := ClientStatus{
+		ID:          id,
+		Name:        name,
+		ConnectedAt: time.Now(),
+		RemoteAddr:  remoteAddr,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeClients[id] = client
+	return client
+}
+
+func (s *Server) unregisterClient(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.activeClients, id)
+}
+
 func (s *Server) Status() Status {
 	s.mu.Lock()
 	startedAt := s.startedAt
 	lastError := s.lastError
 	daemonConfigPath := s.daemonConfigPath
+	activeClients := make([]ClientStatus, 0, len(s.activeClients))
+	for _, client := range s.activeClients {
+		activeClients = append(activeClients, client)
+	}
+	sort.Slice(activeClients, func(i, j int) bool {
+		return activeClients[i].ID < activeClients[j].ID
+	})
 
 	names := make([]string, 0, len(s.proxies))
 	for name := range s.proxies {
@@ -422,6 +502,7 @@ func (s *Server) Status() Status {
 		Clients:          s.clients.Load(),
 		TotalCalls:       s.totalCalls.Load(),
 		LastError:        lastError,
+		ActiveClients:    activeClients,
 		Servers:          make([]ServerStatus, 0, len(names)),
 	}
 	for _, name := range names {
@@ -431,7 +512,7 @@ func (s *Server) Status() Status {
 		}
 		serverStatus := ServerStatus{ProxyStatus: proxy.Status()}
 		if stats != nil {
-			serverStatus.Calls, serverStatus.Errors, serverStatus.LastMethod, serverStatus.LastCallAt, serverStatus.LastError, serverStatus.LastErrorAt, serverStatus.LastReloadedAt = stats.status()
+			serverStatus.Calls, serverStatus.Errors, serverStatus.LastLatencyMS, serverStatus.AvgLatencyMS, serverStatus.MaxLatencyMS, serverStatus.LastMethod, serverStatus.LastCallAt, serverStatus.LastError, serverStatus.LastErrorAt, serverStatus.LastReloadedAt = stats.status()
 		}
 		status.Servers = append(status.Servers, serverStatus)
 	}
