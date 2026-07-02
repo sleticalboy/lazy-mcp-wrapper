@@ -7,7 +7,28 @@ The intended use case is reducing idle memory usage for MCP servers such as Cont
 ## Build
 
 ```bash
-go build -o bin/lazy-mcp-wrapper ./cmd/lazy-mcp-wrapper
+make build
+make test
+```
+
+## Install
+
+Install locally to `~/.local/bin/lazy-mcp-wrapper`:
+
+```bash
+make install
+```
+
+or:
+
+```bash
+./scripts/install-local.sh
+```
+
+Override the prefix when needed:
+
+```bash
+PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 ```
 
 ## Config
