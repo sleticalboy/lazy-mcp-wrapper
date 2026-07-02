@@ -225,6 +225,29 @@ args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/pl
 
 当前 daemon 不会自动后台启动。如果 Codex client 连接不到 daemon，会直接报错退出，避免静默 fallback 导致排查困难。
 
+如果要把 daemon 交给 macOS 用户级 LaunchAgent 管理：
+
+```bash
+make install-agent
+```
+
+卸载：
+
+```bash
+make uninstall-agent
+```
+
+默认 LaunchAgent 信息：
+
+```text
+label:  com.binlee.lazy-mcp-wrapper
+plist:  ~/Library/LaunchAgents/com.binlee.lazy-mcp-wrapper.plist
+socket: ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+logs:   ~/Library/Logs/lazy-mcp-wrapper
+```
+
+安装脚本会把当前 `PATH` 写进 plist，确保 daemon 能找到 `npx`。
+
 ## 缓存
 
 `tools/list` 默认启用缓存。缓存位置默认在系统用户缓存目录下，也可以通过 `cache_dir` 指定。

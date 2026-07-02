@@ -131,6 +131,21 @@ args = ["--config", "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/pl
 
 Keep Playwright in direct lazy wrapper mode for now. A shared Playwright instance can leak browser state across Codex sessions.
 
+On macOS, install the daemon as a user LaunchAgent:
+
+```bash
+cd /Users/binlee/code/open-source/lazy-mcp-wrapper
+make install-agent
+```
+
+Uninstall it with:
+
+```bash
+make uninstall-agent
+```
+
+The LaunchAgent installer writes the current `PATH` into the plist. This is required for `npx`-based MCP servers when launchd's default PATH does not include the Node.js bin directory.
+
 ## Verification After Switching
 
 Start a new Codex session after editing `~/.codex/config.toml`, then verify:

@@ -113,6 +113,20 @@ args = ["client", "--socket", "/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock", "--
 
 Phase 1 is intended for stateless or read-only MCP servers such as Context7 and MasterGo. Keep Playwright in direct lazy wrapper mode until session isolation is implemented.
 
+On macOS, install the shared daemon as a user LaunchAgent:
+
+```bash
+make install-agent
+```
+
+Uninstall it with:
+
+```bash
+make uninstall-agent
+```
+
+The installer writes the current `PATH` into the plist so the daemon can find `npx`.
+
 ## Verification
 
 Run unit and integration tests:
