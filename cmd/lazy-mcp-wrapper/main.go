@@ -95,10 +95,20 @@ func main() {
 func runDaemon(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	socketPath := fs.String("socket", "", "Unix socket path")
+	daemonConfigPath := fs.String("daemon-config", "", "daemon JSON config")
 	configPaths := multiFlag{}
 	fs.Var(&configPaths, "config", "wrapper JSON config; can be repeated")
 	_ = fs.Parse(args)
 
+	if *daemonConfigPath != "" {
+		cfg, err := daemon.LoadConfig(*daemonConfigPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "load daemon config %s: %v\n", *daemonConfigPath, err)
+			os.Exit(2)
+		}
+		*socketPath = cfg.SocketPath
+		configPaths = cfg.ConfigPaths
+	}
 	if *socketPath == "" {
 		fmt.Fprintln(os.Stderr, "missing --socket")
 		os.Exit(2)

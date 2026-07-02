@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="${LABEL:-com.binlee.lazy-mcp-wrapper}"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 SOCKET="${SOCKET:-${HOME}/.lazy-mcp-wrapper/lazy-mcpd.sock}"
+DAEMON_CONFIG="${DAEMON_CONFIG:-${HOME}/.lazy-mcp-wrapper/config.json}"
 BIN="${BIN:-${HOME}/.local/bin/lazy-mcp-wrapper}"
 CONTEXT7_CONFIG="${CONTEXT7_CONFIG:-${ROOT_DIR}/examples/context7.json}"
 MASTERGO_CONFIG="${MASTERGO_CONFIG:-${ROOT_DIR}/configs.local/mastergo-magic-mcp.json}"
@@ -24,11 +25,21 @@ if [[ ! -f "${MASTERGO_CONFIG}" ]]; then
   exit 1
 fi
 
-mkdir -p "$(dirname "${PLIST}")" "$(dirname "${SOCKET}")" "${LOG_DIR}"
+mkdir -p "$(dirname "${PLIST}")" "$(dirname "${SOCKET}")" "$(dirname "${DAEMON_CONFIG}")" "${LOG_DIR}"
 
 launchctl bootout "gui/$(id -u)" "${PLIST}" >/dev/null 2>&1 || true
 launchctl remove "${LABEL}" >/dev/null 2>&1 || true
 rm -f "${SOCKET}"
+
+cat > "${DAEMON_CONFIG}" <<EOF
+{
+  "socket": "${SOCKET}",
+  "configs": [
+    "${CONTEXT7_CONFIG}",
+    "${MASTERGO_CONFIG}"
+  ]
+}
+EOF
 
 cat > "${PLIST}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -41,12 +52,8 @@ cat > "${PLIST}" <<EOF
   <array>
     <string>${BIN}</string>
     <string>daemon</string>
-    <string>--socket</string>
-    <string>${SOCKET}</string>
-    <string>--config</string>
-    <string>${CONTEXT7_CONFIG}</string>
-    <string>--config</string>
-    <string>${MASTERGO_CONFIG}</string>
+    <string>--daemon-config</string>
+    <string>${DAEMON_CONFIG}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -76,6 +83,7 @@ for _ in {1..50}; do
 LaunchAgent installed:
   label:  ${LABEL}
   plist:  ${PLIST}
+  config: ${DAEMON_CONFIG}
   socket: ${SOCKET}
   logs:   ${LOG_DIR}
 EOF

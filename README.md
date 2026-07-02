@@ -108,6 +108,22 @@ lazy-mcp-wrapper daemon \
   --config ./configs.local/mastergo-magic-mcp.json
 ```
 
+Or use a daemon config file:
+
+```json
+{
+  "socket": "/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock",
+  "configs": [
+    "./examples/context7.json",
+    "./configs.local/mastergo-magic-mcp.json"
+  ]
+}
+```
+
+```bash
+lazy-mcp-wrapper daemon --daemon-config /Users/you/.lazy-mcp-wrapper/config.json
+```
+
 Codex client config:
 
 ```toml

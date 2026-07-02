@@ -120,6 +120,24 @@ lazy-mcp-wrapper daemon \
   --config ./configs.local/mastergo-magic-mcp.json
 ```
 
+也可以使用 daemon 配置文件：
+
+```json
+{
+  "socket": "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock",
+  "configs": [
+    "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/context7.json",
+    "/Users/binlee/code/open-source/lazy-mcp-wrapper/configs.local/mastergo-magic-mcp.json"
+  ]
+}
+```
+
+启动：
+
+```bash
+lazy-mcp-wrapper daemon --daemon-config ~/.lazy-mcp-wrapper/config.json
+```
+
 新增 client：
 
 ```bash
@@ -228,6 +246,7 @@ make install-agent
 ```text
 label:  com.binlee.lazy-mcp-wrapper
 plist:  ~/Library/LaunchAgents/com.binlee.lazy-mcp-wrapper.plist
+config: ~/.lazy-mcp-wrapper/config.json
 socket: ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 logs:   ~/Library/Logs/lazy-mcp-wrapper
 ```
@@ -247,5 +266,4 @@ make uninstall-agent
 - `stop` / `reload` 命令。
 - 请求级日志和 client id。
 - Playwright session 隔离。
-- 全局配置文件，避免 daemon 命令传多个 `--config`。
 - 与其他 MCP 客户端共享，不局限于 Codex。

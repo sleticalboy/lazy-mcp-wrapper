@@ -200,6 +200,24 @@ lazy-mcp-wrapper daemon \
   --config /Users/binlee/code/open-source/lazy-mcp-wrapper/configs.local/mastergo-magic-mcp.json
 ```
 
+也可以使用 daemon 配置文件：
+
+```json
+{
+  "socket": "/Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock",
+  "configs": [
+    "/Users/binlee/code/open-source/lazy-mcp-wrapper/examples/context7.json",
+    "/Users/binlee/code/open-source/lazy-mcp-wrapper/configs.local/mastergo-magic-mcp.json"
+  ]
+}
+```
+
+启动命令：
+
+```bash
+lazy-mcp-wrapper daemon --daemon-config /Users/binlee/.lazy-mcp-wrapper/config.json
+```
+
 Codex 中的 client 配置：
 
 ```toml
@@ -242,6 +260,7 @@ make uninstall-agent
 ```text
 label:  com.binlee.lazy-mcp-wrapper
 plist:  ~/Library/LaunchAgents/com.binlee.lazy-mcp-wrapper.plist
+config: ~/.lazy-mcp-wrapper/config.json
 socket: ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 logs:   ~/Library/Logs/lazy-mcp-wrapper
 ```
