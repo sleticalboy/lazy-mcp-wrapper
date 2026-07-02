@@ -106,55 +106,62 @@ func runDaemon(args []string) {
 	fs.Var(&configPaths, "config", "wrapper JSON config; can be repeated")
 	_ = fs.Parse(args)
 
+	var server *daemon.Server
 	if *daemonConfigPath != "" {
-		cfg, err := daemon.LoadConfig(*daemonConfigPath)
+		loaded, err := daemon.LoadConfig(*daemonConfigPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "load daemon config %s: %v\n", *daemonConfigPath, err)
 			os.Exit(2)
 		}
-		*socketPath = cfg.SocketPath
-		configPaths = cfg.ConfigPaths
-	}
-	if *socketPath == "" {
-		fmt.Fprintln(os.Stderr, "missing --socket")
-		os.Exit(2)
-	}
-	if len(configPaths) == 0 {
-		fmt.Fprintln(os.Stderr, "missing --config")
-		os.Exit(2)
-	}
-
-	configs := make([]wrapper.Config, 0, len(configPaths))
-	loggers := make(map[string]*log.Logger, len(configPaths))
-	closers := make([]io.Closer, 0, len(configPaths))
-	for _, path := range configPaths {
-		cfg, err := wrapper.LoadConfig(path)
+		*socketPath = loaded.SocketPath
+		server, err = daemon.NewServerFromConfig(*daemonConfigPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "load config %s: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "create daemon: %v\n", err)
 			os.Exit(2)
 		}
-		logger, closer, err := wrapper.NewLogger(cfg.LogFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "open log for %s: %v\n", cfg.Name, err)
+	} else {
+		if *socketPath == "" {
+			fmt.Fprintln(os.Stderr, "missing --socket")
 			os.Exit(2)
 		}
-		if closer != nil {
-			closers = append(closers, closer)
+		if len(configPaths) == 0 {
+			fmt.Fprintln(os.Stderr, "missing --config")
+			os.Exit(2)
 		}
-		configs = append(configs, cfg)
-		loggers[cfg.Name] = logger
-		logger.Printf("daemon registered MCP %s", cfg.Name)
-	}
-	defer func() {
-		for _, closer := range closers {
-			_ = closer.Close()
-		}
-	}()
 
-	server, err := daemon.NewServer(*socketPath, configs, loggers)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "create daemon: %v\n", err)
-		os.Exit(2)
+		configs := make([]wrapper.Config, 0, len(configPaths))
+		loggers := make(map[string]*log.Logger, len(configPaths))
+		closers := make([]io.Closer, 0, len(configPaths))
+		for _, path := range configPaths {
+			cfg, err := wrapper.LoadConfig(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "load config %s: %v\n", path, err)
+				os.Exit(2)
+			}
+			logger, closer, err := wrapper.NewLogger(cfg.LogFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "open log for %s: %v\n", cfg.Name, err)
+				os.Exit(2)
+			}
+			if closer != nil {
+				closers = append(closers, closer)
+			}
+			configs = append(configs, cfg)
+			loggers[cfg.Name] = logger
+			logger.Printf("daemon registered MCP %s", cfg.Name)
+		}
+		defer func() {
+			for _, closer := range closers {
+				_ = closer.Close()
+			}
+		}()
+
+		var err error
+		server, err = daemon.NewServer(*socketPath, configs, loggers)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create daemon: %v\n", err)
+			os.Exit(2)
+		}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

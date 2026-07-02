@@ -224,6 +224,18 @@ func TestTotalCallsCountsJSONRPCRequests(t *testing.T) {
 	if status.TotalCalls != 1 {
 		t.Fatalf("total_calls = %d, want 1", status.TotalCalls)
 	}
+	if len(status.Servers) != 1 {
+		t.Fatalf("servers len = %d, want 1", len(status.Servers))
+	}
+	if status.Servers[0].Calls != 1 {
+		t.Fatalf("server calls = %d, want 1", status.Servers[0].Calls)
+	}
+	if status.Servers[0].LastMethod != "tools/list" {
+		t.Fatalf("last method = %q, want tools/list", status.Servers[0].LastMethod)
+	}
+	if status.Servers[0].LastCallAt == nil {
+		t.Fatalf("last call at is nil")
+	}
 
 	cancel()
 	if err := <-errc; err != nil {
@@ -231,7 +243,7 @@ func TestTotalCallsCountsJSONRPCRequests(t *testing.T) {
 	}
 }
 
-func TestControlReload(t *testing.T) {
+func TestControlReloadRequiresDaemonConfig(t *testing.T) {
 	socketPath := testSocketPath(t)
 	defer os.Remove(socketPath)
 	cfg := wrapper.Config{Name: "fake", Command: "fake"}
@@ -253,8 +265,67 @@ func TestControlReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendControl(reload) error = %v", err)
 	}
-	if resp.OK || !strings.Contains(resp.Error, "hot reload is not supported") {
-		t.Fatalf("SendControl(reload) = %#v, want unsupported", resp)
+	if resp.OK || !strings.Contains(resp.Error, "requires daemon to start with --daemon-config") {
+		t.Fatalf("SendControl(reload) = %#v, want daemon config error", resp)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+func TestControlReloadFromDaemonConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+	fakeMCP := buildFakeMCP(t, tempDir)
+
+	firstConfigPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "first", Command: fakeMCP})
+	daemonConfigPath := writeDaemonConfig(t, tempDir, socketPath, []string{firstConfigPath})
+	server, err := NewServerFromConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("NewServerFromConfig() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "first" {
+		t.Fatalf("unexpected servers before reload: %#v", status.Servers)
+	}
+	if status.DaemonConfigPath != daemonConfigPath {
+		t.Fatalf("daemon config path = %q, want %q", status.DaemonConfigPath, daemonConfigPath)
+	}
+
+	secondConfigPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "second", Command: fakeMCP})
+	writeDaemonConfig(t, tempDir, socketPath, []string{secondConfigPath})
+	resp, err := SendControl(socketPath, "reload")
+	if err != nil {
+		t.Fatalf("SendControl(reload) error = %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("SendControl(reload) = %#v, want ok", resp)
+	}
+
+	status, err = QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "second" {
+		t.Fatalf("unexpected servers after reload: %#v", status.Servers)
+	}
+	if status.Servers[0].LastReloadedAt == nil {
+		t.Fatalf("last_reloaded_at is nil after reload")
 	}
 
 	cancel()
@@ -319,6 +390,41 @@ func testCommand(t *testing.T, name string, args ...string) *exec.Cmd {
 func testSocketPath(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(os.TempDir(), "lmcp-"+strings.ReplaceAll(t.Name(), "/", "-")+".sock")
+}
+
+func writeWrapperConfig(t *testing.T, dir string, cfg wrapper.Config) string {
+	t.Helper()
+	if cfg.IdleTimeout.Duration == 0 {
+		cfg.IdleTimeout.Duration = time.Second
+	}
+	if cfg.StartupTimeout.Duration == 0 {
+		cfg.StartupTimeout.Duration = 5 * time.Second
+	}
+	if cfg.CallTimeout.Duration == 0 {
+		cfg.CallTimeout.Duration = 5 * time.Second
+	}
+	path := filepath.Join(dir, cfg.Name+".json")
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal wrapper config: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write wrapper config: %v", err)
+	}
+	return path
+}
+
+func writeDaemonConfig(t *testing.T, dir, socketPath string, configPaths []string) string {
+	t.Helper()
+	path := filepath.Join(dir, "daemon.json")
+	data, err := json.Marshal(Config{SocketPath: socketPath, ConfigPaths: configPaths})
+	if err != nil {
+		t.Fatalf("marshal daemon config: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	return path
 }
 
 func waitForSocket(t *testing.T, socketPath string, errc <-chan error) {

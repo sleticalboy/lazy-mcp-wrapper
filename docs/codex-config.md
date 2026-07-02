@@ -182,7 +182,7 @@ Shared daemon control:
 /Users/binlee/.local/bin/lazy-mcp-wrapper reload --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-`reload` currently returns an unsupported error. Use `make install-agent` after daemon config changes when the macOS LaunchAgent manages the daemon.
+`reload` hot-reloads the daemon only when it was started with `--daemon-config`, which is how `make install-agent` configures the macOS LaunchAgent. Manual `daemon --config ...` mode returns an explicit error because it has no reload source.
 
 Local smoke commands:
 

@@ -156,6 +156,7 @@ lazy-mcp-wrapper status \
 状态输出包含：
 
 - daemon pid。
+- daemon 配置路径。
 - daemon 启动时间和运行时长。
 - 当前连接 client 数。
 - 已转发调用数。
@@ -164,6 +165,8 @@ lazy-mcp-wrapper status \
 - 真实 MCP 是否已启动。
 - 真实 MCP pid。
 - 最近使用时间。
+- MCP 请求数和错误数。
+- MCP 最近方法、最近错误和最近 reload 时间。
 
 停止 daemon：
 
@@ -174,14 +177,14 @@ lazy-mcp-wrapper stop \
 
 如果 daemon 由 LaunchAgent 管理，launchd 会按已安装配置重新拉起。
 
-热重载命令预留如下：
+热重载 daemon 配置：
 
 ```bash
 lazy-mcp-wrapper reload \
   --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-第一阶段还不支持热重载，命令会返回明确错误。配置变更后用 `make install-agent` 重新安装并重启 LaunchAgent。
+只有通过 `--daemon-config` 启动的 daemon 支持热重载。reload 会重新读取 daemon 配置文件，构建新的 MCP 代理集合，成功后关闭旧真实 MCP 进程和旧日志文件。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。
 
 Codex 配置示例：
 
@@ -287,8 +290,7 @@ make uninstall-agent
 
 第二阶段可以考虑：
 
-- 热重载 daemon 配置。
 - client id。
-- MCP 级别请求数和错误数。
+- MCP 级别延迟统计。
 - Playwright session 隔离。
 - 与其他 MCP 客户端共享，不局限于 Codex。

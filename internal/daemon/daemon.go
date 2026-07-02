@@ -24,14 +24,26 @@ type BindRequest struct {
 }
 
 type Status struct {
-	SocketPath string                `json:"socket_path"`
-	DaemonPID  int                   `json:"daemon_pid"`
-	StartedAt  time.Time             `json:"started_at"`
-	Uptime     string                `json:"uptime"`
-	Clients    int64                 `json:"clients"`
-	TotalCalls int64                 `json:"total_calls"`
-	LastError  string                `json:"last_error,omitempty"`
-	Servers    []wrapper.ProxyStatus `json:"servers"`
+	SocketPath       string         `json:"socket_path"`
+	DaemonConfigPath string         `json:"daemon_config_path,omitempty"`
+	DaemonPID        int            `json:"daemon_pid"`
+	StartedAt        time.Time      `json:"started_at"`
+	Uptime           string         `json:"uptime"`
+	Clients          int64          `json:"clients"`
+	TotalCalls       int64          `json:"total_calls"`
+	LastError        string         `json:"last_error,omitempty"`
+	Servers          []ServerStatus `json:"servers"`
+}
+
+type ServerStatus struct {
+	wrapper.ProxyStatus
+	Calls          int64      `json:"calls"`
+	Errors         int64      `json:"errors"`
+	LastMethod     string     `json:"last_method,omitempty"`
+	LastCallAt     *time.Time `json:"last_call_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+	LastErrorAt    *time.Time `json:"last_error_at,omitempty"`
+	LastReloadedAt *time.Time `json:"last_reloaded_at,omitempty"`
 }
 
 type ControlResponse struct {
@@ -41,15 +53,29 @@ type ControlResponse struct {
 }
 
 type Server struct {
-	socketPath string
-	proxies    map[string]*wrapper.Proxy
-	loggers    map[string]*log.Logger
-	startedAt  time.Time
-	cancel     context.CancelFunc
-	clients    atomic.Int64
-	totalCalls atomic.Int64
-	lastError  string
-	mu         sync.Mutex
+	socketPath       string
+	daemonConfigPath string
+	proxies          map[string]*wrapper.Proxy
+	loggers          map[string]*log.Logger
+	closers          map[string]io.Closer
+	stats            map[string]*proxyStats
+	startedAt        time.Time
+	cancel           context.CancelFunc
+	clients          atomic.Int64
+	totalCalls       atomic.Int64
+	lastError        string
+	mu               sync.Mutex
+}
+
+type proxyStats struct {
+	calls          atomic.Int64
+	errors         atomic.Int64
+	lastReloadedAt time.Time
+	mu             sync.Mutex
+	lastMethod     string
+	lastCallAt     time.Time
+	lastError      string
+	lastErrorAt    time.Time
 }
 
 func NewServer(socketPath string, configs []wrapper.Config, loggers map[string]*log.Logger) (*Server, error) {
@@ -63,30 +89,200 @@ func NewServer(socketPath string, configs []wrapper.Config, loggers map[string]*
 	server := &Server{
 		socketPath: socketPath,
 		proxies:    make(map[string]*wrapper.Proxy, len(configs)),
-		loggers:    loggers,
+		loggers:    make(map[string]*log.Logger, len(configs)),
+		closers:    map[string]io.Closer{},
+		stats:      make(map[string]*proxyStats, len(configs)),
 		startedAt:  time.Now(),
 	}
 	for _, cfg := range configs {
-		if _, exists := server.proxies[cfg.Name]; exists {
-			return nil, fmt.Errorf("duplicate MCP name: %s", cfg.Name)
+		var logger *log.Logger
+		if loggers != nil {
+			logger = loggers[cfg.Name]
 		}
-		logger := loggers[cfg.Name]
-		if logger == nil {
-			logger = log.New(io.Discard, "", 0)
+		if err := server.addProxyLocked(cfg, logger, nil, time.Time{}); err != nil {
+			return nil, err
 		}
-		name := cfg.Name
-		server.proxies[name] = wrapper.NewProxyWithOptions(cfg, logger, wrapper.ProxyOptions{
-			KeepRealOnClientClose: true,
-			OnRequest: func(method string) {
-				if method != "initialize" && method != "ping" {
-					server.totalCalls.Add(1)
-				}
-				logger.Printf("client request name=%s method=%s", name, method)
-			},
-		})
 	}
 
 	return server, nil
+}
+
+func NewServerFromConfig(path string) (*Server, error) {
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.SocketPath == "" {
+		return nil, fmt.Errorf("socket path is required")
+	}
+	if len(cfg.ConfigPaths) == 0 {
+		return nil, fmt.Errorf("at least one config is required")
+	}
+
+	server := &Server{
+		socketPath:       cfg.SocketPath,
+		daemonConfigPath: path,
+		proxies:          make(map[string]*wrapper.Proxy, len(cfg.ConfigPaths)),
+		loggers:          make(map[string]*log.Logger, len(cfg.ConfigPaths)),
+		closers:          make(map[string]io.Closer, len(cfg.ConfigPaths)),
+		stats:            make(map[string]*proxyStats, len(cfg.ConfigPaths)),
+		startedAt:        time.Now(),
+	}
+	if err := server.reloadFromConfigLocked(time.Time{}); err != nil {
+		server.closeResources()
+		return nil, err
+	}
+	return server, nil
+}
+
+func (s *Server) addProxyLocked(cfg wrapper.Config, logger *log.Logger, closer io.Closer, reloadedAt time.Time) error {
+	if _, exists := s.proxies[cfg.Name]; exists {
+		if closer != nil {
+			_ = closer.Close()
+		}
+		return fmt.Errorf("duplicate MCP name: %s", cfg.Name)
+	}
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+	name := cfg.Name
+	proxy, stats := s.buildProxy(cfg, logger, reloadedAt)
+	s.proxies[name] = proxy
+	s.stats[name] = stats
+	s.loggers[name] = logger
+	if closer != nil {
+		s.closers[name] = closer
+	}
+	return nil
+}
+
+func (s *Server) buildProxy(cfg wrapper.Config, logger *log.Logger, reloadedAt time.Time) (*wrapper.Proxy, *proxyStats) {
+	name := cfg.Name
+	stats := &proxyStats{lastReloadedAt: reloadedAt}
+	proxy := wrapper.NewProxyWithOptions(cfg, logger, wrapper.ProxyOptions{
+		KeepRealOnClientClose: true,
+		OnRequest: func(method string) {
+			if method != "initialize" && method != "ping" {
+				s.totalCalls.Add(1)
+				stats.calls.Add(1)
+			}
+			stats.recordCall(method)
+			logger.Printf("client request name=%s method=%s", name, method)
+		},
+		OnResponse: func(method string, hasError bool, errorMessage string) {
+			if !hasError {
+				return
+			}
+			stats.recordError(method, errorMessage)
+			s.setLastError(fmt.Errorf("%s %s: %s", name, method, errorMessage))
+			logger.Printf("client response error name=%s method=%s error=%s", name, method, errorMessage)
+		},
+	})
+	return proxy, stats
+}
+
+func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) error {
+	cfg, err := LoadConfig(s.daemonConfigPath)
+	if err != nil {
+		return err
+	}
+	if cfg.SocketPath != s.socketPath {
+		return fmt.Errorf("reload cannot change socket path from %s to %s", s.socketPath, cfg.SocketPath)
+	}
+
+	proxies := make(map[string]*wrapper.Proxy, len(cfg.ConfigPaths))
+	loggers := make(map[string]*log.Logger, len(cfg.ConfigPaths))
+	closers := make(map[string]io.Closer, len(cfg.ConfigPaths))
+	stats := make(map[string]*proxyStats, len(cfg.ConfigPaths))
+	next := &Server{
+		socketPath: s.socketPath,
+		proxies:    proxies,
+		loggers:    loggers,
+		closers:    closers,
+		stats:      stats,
+	}
+	for _, path := range cfg.ConfigPaths {
+		mcpConfig, err := wrapper.LoadConfig(path)
+		if err != nil {
+			next.closeResources()
+			return fmt.Errorf("load config %s: %w", path, err)
+		}
+		logger, closer, err := wrapper.NewLogger(mcpConfig.LogFile)
+		if err != nil {
+			next.closeResources()
+			return fmt.Errorf("open log for %s: %w", mcpConfig.Name, err)
+		}
+		if _, exists := proxies[mcpConfig.Name]; exists {
+			if closer != nil {
+				_ = closer.Close()
+			}
+			next.closeResources()
+			return fmt.Errorf("duplicate MCP name: %s", mcpConfig.Name)
+		}
+		proxy, stat := s.buildProxy(mcpConfig, logger, reloadedAt)
+		proxies[mcpConfig.Name] = proxy
+		loggers[mcpConfig.Name] = logger
+		stats[mcpConfig.Name] = stat
+		if closer != nil {
+			closers[mcpConfig.Name] = closer
+		}
+	}
+	s.closeResources()
+	s.proxies = next.proxies
+	s.loggers = next.loggers
+	s.closers = next.closers
+	s.stats = next.stats
+	return nil
+}
+
+func (s *Server) closeResources() {
+	for _, proxy := range s.proxies {
+		proxy.Close()
+	}
+	for _, closer := range s.closers {
+		_ = closer.Close()
+	}
+}
+
+func (s *proxyStats) recordCall(method string) {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastMethod = method
+	s.lastCallAt = now
+}
+
+func (s *proxyStats) recordError(method, message string) {
+	now := time.Now()
+	s.errors.Add(1)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastMethod = method
+	s.lastCallAt = now
+	s.lastError = message
+	s.lastErrorAt = now
+}
+
+func (s *proxyStats) status() (calls int64, errors int64, lastMethod string, lastCallAt *time.Time, lastError string, lastErrorAt *time.Time, lastReloadedAt *time.Time) {
+	calls = s.calls.Load()
+	errors = s.errors.Load()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lastMethod = s.lastMethod
+	if !s.lastCallAt.IsZero() {
+		value := s.lastCallAt
+		lastCallAt = &value
+	}
+	lastError = s.lastError
+	if !s.lastErrorAt.IsZero() {
+		value := s.lastErrorAt
+		lastErrorAt = &value
+	}
+	if !s.lastReloadedAt.IsZero() {
+		value := s.lastReloadedAt
+		lastReloadedAt = &value
+	}
+	return calls, errors, lastMethod, lastCallAt, lastError, lastErrorAt, lastReloadedAt
 }
 
 func (s *Server) Serve(ctx context.Context) error {
@@ -95,6 +291,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 	defer cancel()
+	defer s.closeResources()
 
 	if err := os.MkdirAll(filepath.Dir(s.socketPath), 0755); err != nil {
 		return err
@@ -148,7 +345,11 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			s.stop()
 			return
 		case "reload":
-			_ = s.writeControl(conn, ControlResponse{OK: false, Error: "hot reload is not supported; restart the LaunchAgent"})
+			if err := s.reload(); err != nil {
+				_ = s.writeControl(conn, ControlResponse{OK: false, Error: err.Error()})
+				return
+			}
+			_ = s.writeControl(conn, ControlResponse{OK: true, Message: "daemon config reloaded"})
 			return
 		}
 		_ = writeBindError(conn, "invalid bind request")
@@ -184,6 +385,12 @@ func (s *Server) proxy(name string) *wrapper.Proxy {
 	return s.proxies[name]
 }
 
+func (s *Server) proxyAndStats(name string) (*wrapper.Proxy, *proxyStats) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.proxies[name], s.stats[name]
+}
+
 func (s *Server) logger(name string) *log.Logger {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -197,6 +404,7 @@ func (s *Server) Status() Status {
 	s.mu.Lock()
 	startedAt := s.startedAt
 	lastError := s.lastError
+	daemonConfigPath := s.daemonConfigPath
 
 	names := make([]string, 0, len(s.proxies))
 	for name := range s.proxies {
@@ -206,19 +414,26 @@ func (s *Server) Status() Status {
 	s.mu.Unlock()
 
 	status := Status{
-		SocketPath: s.socketPath,
-		DaemonPID:  os.Getpid(),
-		StartedAt:  startedAt,
-		Uptime:     time.Since(startedAt).Round(time.Second).String(),
-		Clients:    s.clients.Load(),
-		TotalCalls: s.totalCalls.Load(),
-		LastError:  lastError,
-		Servers:    make([]wrapper.ProxyStatus, 0, len(names)),
+		SocketPath:       s.socketPath,
+		DaemonConfigPath: daemonConfigPath,
+		DaemonPID:        os.Getpid(),
+		StartedAt:        startedAt,
+		Uptime:           time.Since(startedAt).Round(time.Second).String(),
+		Clients:          s.clients.Load(),
+		TotalCalls:       s.totalCalls.Load(),
+		LastError:        lastError,
+		Servers:          make([]ServerStatus, 0, len(names)),
 	}
 	for _, name := range names {
-		if proxy := s.proxy(name); proxy != nil {
-			status.Servers = append(status.Servers, proxy.Status())
+		proxy, stats := s.proxyAndStats(name)
+		if proxy == nil {
+			continue
 		}
+		serverStatus := ServerStatus{ProxyStatus: proxy.Status()}
+		if stats != nil {
+			serverStatus.Calls, serverStatus.Errors, serverStatus.LastMethod, serverStatus.LastCallAt, serverStatus.LastError, serverStatus.LastErrorAt, serverStatus.LastReloadedAt = stats.status()
+		}
+		status.Servers = append(status.Servers, serverStatus)
 	}
 	return status
 }
@@ -248,6 +463,20 @@ func (s *Server) stop() {
 	if cancel != nil {
 		go cancel()
 	}
+}
+
+func (s *Server) reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.daemonConfigPath == "" {
+		return fmt.Errorf("reload requires daemon to start with --daemon-config")
+	}
+	if err := s.reloadFromConfigLocked(time.Now()); err != nil {
+		s.lastError = err.Error()
+		return err
+	}
+	s.lastError = ""
+	return nil
 }
 
 func (s *Server) setLastError(err error) {

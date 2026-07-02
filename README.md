@@ -100,9 +100,9 @@ lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-`status` includes daemon pid, start time, uptime, active clients, forwarded calls, last error, and per-MCP process state.
+`status` includes daemon config path, daemon pid, start time, uptime, active clients, forwarded calls, last error, and per-MCP metrics such as calls, errors, last method, and last error.
 
-`reload` currently reports that hot reload is unsupported. Re-run `make install-agent` to apply daemon config changes when using the macOS LaunchAgent.
+`reload` hot-reloads the daemon config only when the daemon was started with `--daemon-config`. Manual `daemon --config ...` mode has no reload source and returns an explicit error.
 
 ## Notes
 

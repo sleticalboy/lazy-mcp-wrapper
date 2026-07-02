@@ -275,11 +275,13 @@ lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-`status` 会输出 daemon pid、启动时间、运行时长、当前 client 数、已转发调用数、最近错误和各 MCP 运行状态。
+`status` 会输出 daemon 配置路径、daemon pid、启动时间、运行时长、当前 client 数、已转发调用数、最近错误和各 MCP 运行状态。
+
+每个 MCP 的状态会包含请求数、错误数、最近一次方法、最近一次错误和最近一次 reload 时间。
 
 `stop` 会请求 daemon 退出。如果使用 LaunchAgent 管理，launchd 会按配置重新拉起。
 
-`reload` 当前只返回明确的“不支持热重载”错误。配置变更后使用 `make install-agent` 重新安装并重启 LaunchAgent。
+`reload` 只支持通过 `--daemon-config` 启动的 daemon，会重新读取 daemon 配置文件并替换 MCP 代理。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。
 
 ## 缓存
 
@@ -297,7 +299,7 @@ lazy-mcp-wrapper --config ./examples/context7.json --inspect
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 ```
 
-输出会包含 daemon pid、启动时间、运行时长、当前 client 数、已转发调用数、最近错误、已注册 MCP、真实 MCP 是否已经启动、真实进程 pid 和最近使用时间。
+输出会包含 daemon 配置路径、daemon pid、启动时间、运行时长、当前 client 数、已转发调用数、最近错误、已注册 MCP、真实 MCP 是否已经启动、真实进程 pid、最近使用时间、MCP 请求数、错误数、最近方法和最近错误。
 
 刷新缓存：
 

@@ -36,6 +36,7 @@ type Proxy struct {
 type ProxyOptions struct {
 	KeepRealOnClientClose bool
 	OnRequest             func(method string)
+	OnResponse            func(method string, hasError bool, errorMessage string)
 }
 
 type ProxyStatus struct {
@@ -89,6 +90,13 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 			p.opts.OnRequest(msg.Method)
 		}
 		resp := p.handleRequest(ctx, msg)
+		if p.opts.OnResponse != nil {
+			errorMessage := ""
+			if resp.Error != nil {
+				errorMessage = resp.Error.Message
+			}
+			p.opts.OnResponse(msg.Method, resp.Error != nil, errorMessage)
+		}
 		if reader.SeenFraming() {
 			writer = jsonrpc.NewWriterWithFraming(out, reader.Framing())
 		}
@@ -245,6 +253,10 @@ func (p *Proxy) stopReal() {
 		_ = p.client.close()
 		p.client = nil
 	}
+}
+
+func (p *Proxy) Close() {
+	p.stopReal()
 }
 
 func (p *Proxy) Status() ProxyStatus {
