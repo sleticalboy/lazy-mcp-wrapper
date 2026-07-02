@@ -54,9 +54,9 @@ func installLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 	if err := os.MkdirAll(plan.LogDir, 0755); err != nil {
 		return err
 	}
-	_ = execer("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), plan.PlistPath)
-	_ = execer("launchctl", "remove", plan.Label)
-	_ = os.Remove(plan.SocketPath)
+	if err := uninstallLaunchAgent(plan, execer); err != nil {
+		return err
+	}
 	if err := os.WriteFile(plan.PlistPath, plan.Content, 0644); err != nil {
 		return err
 	}
@@ -73,6 +73,21 @@ func installLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 		return nil
 	}
 	return pollSocket(plan.SocketPath, plan.SocketPollAttempts, 100*time.Millisecond)
+}
+
+func uninstallLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
+	if execer == nil {
+		execer = realExec
+	}
+	_ = execer("launchctl", "bootout", fmt.Sprintf("gui/%d", os.Getuid()), plan.PlistPath)
+	_ = execer("launchctl", "remove", plan.Label)
+	if err := os.Remove(plan.SocketPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(plan.PlistPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func realExec(name string, args ...string) error {

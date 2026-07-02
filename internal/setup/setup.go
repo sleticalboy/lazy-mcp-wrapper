@@ -123,14 +123,10 @@ func NewPlan(opts Options) (Plan, error) {
 	if len(mergedConfigPaths) == 0 {
 		plan.Blockers = append(plan.Blockers, "no wrappable stdio MCP servers found")
 	}
-	daemonData, err := json.MarshalIndent(map[string]any{
-		"socket":  socketPath,
-		"configs": mergedConfigPaths,
-	}, "", "  ")
+	daemonData, err := buildDaemonConfigContent(socketPath, mergedConfigPaths)
 	if err != nil {
 		return Plan{}, err
 	}
-	daemonData = append(daemonData, '\n')
 	plan.DaemonConfig = DaemonConfigPlan{
 		ConfigPath:  daemonConfigPath,
 		SocketPath:  socketPath,
@@ -162,30 +158,7 @@ func NewPlan(opts Options) (Plan, error) {
 		})
 	}
 
-	plistPath := filepath.Join(opts.Home, "Library", "LaunchAgents", defaultLabel+".plist")
-	logDir := filepath.Join(opts.Home, "Library", "Logs", "lazy-mcp-wrapper")
-	pathValue := os.Getenv("PATH")
-	plist := buildPlistXML(LaunchAgentPlan{
-		Label:              defaultLabel,
-		PlistPath:          plistPath,
-		SocketPath:         socketPath,
-		SocketPollAttempts: 50,
-		DaemonConfig:       daemonConfigPath,
-		BinaryPath:         opts.BinaryPath,
-		LogDir:             logDir,
-		PATH:               pathValue,
-	})
-	plan.LaunchAgent = LaunchAgentPlan{
-		Label:              defaultLabel,
-		PlistPath:          plistPath,
-		SocketPath:         socketPath,
-		SocketPollAttempts: 50,
-		DaemonConfig:       daemonConfigPath,
-		BinaryPath:         opts.BinaryPath,
-		LogDir:             logDir,
-		PATH:               pathValue,
-		Content:            []byte(plist),
-	}
+	plan.LaunchAgent = defaultLaunchAgentPlan(opts)
 
 	return plan, nil
 }
@@ -342,6 +315,56 @@ func writeDaemonConfig(plan DaemonConfigPlan) error {
 		return err
 	}
 	return os.WriteFile(plan.ConfigPath, plan.Content, 0644)
+}
+
+func buildDaemonConfigContent(socketPath string, configPaths []string) ([]byte, error) {
+	daemonData, err := json.MarshalIndent(map[string]any{
+		"socket":  socketPath,
+		"configs": configPaths,
+	}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(daemonData, '\n'), nil
+}
+
+func defaultDaemonConfigPlan(home string, configPaths []string) (DaemonConfigPlan, error) {
+	configPath := filepath.Join(home, daemonRel)
+	socketPath := filepath.Join(home, socketRel)
+	if cfg, err := daemon.LoadConfig(configPath); err == nil && cfg.SocketPath != "" {
+		socketPath = cfg.SocketPath
+	}
+	content, err := buildDaemonConfigContent(socketPath, configPaths)
+	if err != nil {
+		return DaemonConfigPlan{}, err
+	}
+	return DaemonConfigPlan{
+		ConfigPath:  configPath,
+		SocketPath:  socketPath,
+		ConfigPaths: configPaths,
+		Content:     content,
+	}, nil
+}
+
+func defaultLaunchAgentPlan(opts Options) LaunchAgentPlan {
+	opts = normalizeOptions(opts)
+	plistPath := filepath.Join(opts.Home, "Library", "LaunchAgents", defaultLabel+".plist")
+	socketPath := filepath.Join(opts.Home, socketRel)
+	daemonConfigPath := filepath.Join(opts.Home, daemonRel)
+	logDir := filepath.Join(opts.Home, "Library", "Logs", "lazy-mcp-wrapper")
+	pathValue := os.Getenv("PATH")
+	plan := LaunchAgentPlan{
+		Label:              defaultLabel,
+		PlistPath:          plistPath,
+		SocketPath:         socketPath,
+		SocketPollAttempts: 50,
+		DaemonConfig:       daemonConfigPath,
+		BinaryPath:         opts.BinaryPath,
+		LogDir:             logDir,
+		PATH:               pathValue,
+	}
+	plan.Content = []byte(buildPlistXML(plan))
+	return plan
 }
 
 func backupPath(path string, now time.Time) string {

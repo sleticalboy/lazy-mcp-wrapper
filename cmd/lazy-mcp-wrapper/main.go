@@ -19,9 +19,17 @@ import (
 	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
 )
 
+var version = "dev"
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version":
+			printVersion()
+			return
+		case "--version":
+			printVersion()
+			return
 		case "daemon":
 			runDaemon(os.Args[2:])
 			return
@@ -47,8 +55,13 @@ func main() {
 	refreshCache := flag.Bool("refresh-cache", false, "refresh tools/list cache and exit")
 	clearCache := flag.Bool("clear-cache", false, "clear tools/list cache and exit")
 	inspect := flag.Bool("inspect", false, "print resolved config and cache status as JSON and exit")
+	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
+	if *versionFlag {
+		printVersion()
+		return
+	}
 	if *printExample {
 		fmt.Println(exampleConfig)
 		return
@@ -103,6 +116,10 @@ func main() {
 		logger.Printf("wrapper stopped: %v", err)
 		os.Exit(1)
 	}
+}
+
+func printVersion() {
+	fmt.Printf("lazy-mcp-wrapper %s\n", version)
 }
 
 func runDaemon(args []string) {
@@ -325,6 +342,20 @@ func runSetup(args []string) {
 	home := fs.String("home", "", "home directory to scan; defaults to current user home")
 	binaryPath := fs.String("bin", "", "lazy-mcp-wrapper binary path; defaults to current executable")
 	_ = fs.Parse(args)
+	subcmd := ""
+	subcmdArgs := fs.Args()
+	if len(subcmdArgs) > 0 {
+		subcmd = subcmdArgs[0]
+		subcmdArgs = subcmdArgs[1:]
+	}
+	if subcmd != "" {
+		subFS := flag.NewFlagSet("setup "+subcmd, flag.ExitOnError)
+		subFS.BoolVar(yes, "yes", *yes, "apply all changes without prompts")
+		subFS.BoolVar(dryRun, "dry-run", *dryRun, "print setup plan without applying")
+		subFS.StringVar(home, "home", *home, "home directory to scan; defaults to current user home")
+		subFS.StringVar(binaryPath, "bin", *binaryPath, "lazy-mcp-wrapper binary path; defaults to current executable")
+		_ = subFS.Parse(subcmdArgs)
+	}
 
 	bin := *binaryPath
 	if bin == "" {
@@ -337,6 +368,27 @@ func runSetup(args []string) {
 		BinaryPath: bin,
 		YesAll:     *yes,
 		DryRun:     *dryRun,
+	}
+	switch subcmd {
+	case "status":
+		setup.PrintStatusReport(os.Stdout, setup.Status(opts))
+		return
+	case "uninstall":
+		if err := setup.Uninstall(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup uninstall: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	case "update":
+		if err := setup.Update(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup update: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	case "":
+	default:
+		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup: unknown subcommand %q\n", subcmd)
+		os.Exit(2)
 	}
 	plan, err := setup.NewPlan(opts)
 	if err != nil {
