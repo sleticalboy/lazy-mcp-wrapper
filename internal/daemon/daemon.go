@@ -21,6 +21,7 @@ import (
 type BindRequest struct {
 	Name    string `json:"name"`
 	Control string `json:"control"`
+	Force   bool   `json:"force,omitempty"`
 }
 
 type Status struct {
@@ -396,7 +397,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			s.stop()
 			return
 		case "reload":
-			if err := s.reload(); err != nil {
+			if err := s.reload(bind.Force); err != nil {
 				_ = s.writeControl(conn, ControlResponse{OK: false, Error: err.Error()})
 				return
 			}
@@ -546,11 +547,14 @@ func (s *Server) stop() {
 	}
 }
 
-func (s *Server) reload() error {
+func (s *Server) reload(force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.daemonConfigPath == "" {
 		return fmt.Errorf("reload requires daemon to start with --daemon-config")
+	}
+	if !force && len(s.activeClients) > 0 {
+		return fmt.Errorf("reload busy: %d active client(s); retry later or use --force", len(s.activeClients))
 	}
 	if err := s.reloadFromConfigLocked(time.Now()); err != nil {
 		s.lastError = err.Error()

@@ -289,9 +289,13 @@ func formatTime(value time.Time) string {
 func runControl(args []string, control string) {
 	fs := flag.NewFlagSet(control, flag.ExitOnError)
 	socketPath := fs.String("socket", "", "Unix socket path")
+	force := false
+	if control == "reload" {
+		fs.BoolVar(&force, "force", false, "force reload even when active clients are connected")
+	}
 	_ = fs.Parse(args)
 
-	resp, err := daemon.SendControl(*socketPath, control)
+	resp, err := daemon.SendControl(*socketPath, control, daemon.ControlOptions{Force: force})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper %s: %v\n", control, err)
 		os.Exit(1)

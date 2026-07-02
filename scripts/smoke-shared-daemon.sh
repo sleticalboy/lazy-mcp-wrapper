@@ -7,6 +7,10 @@ FAKE_MCP="${ROOT_DIR}/bin/fake-mcp"
 TMP_DIR="$(mktemp -d)"
 
 cleanup() {
+  if [[ -n "${HELD_CLIENT_PID:-}" ]] && kill -0 "${HELD_CLIENT_PID}" 2>/dev/null; then
+    kill "${HELD_CLIENT_PID}" 2>/dev/null || true
+    wait "${HELD_CLIENT_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${DAEMON_PID:-}" ]] && kill -0 "${DAEMON_PID}" 2>/dev/null; then
     kill "${DAEMON_PID}" 2>/dev/null || true
     wait "${DAEMON_PID}" 2>/dev/null || true
@@ -72,6 +76,29 @@ grep -q '"last_latency_ms":' "${STATUS_JSON}"
 
 "${WRAPPER}" status --socket "${SOCKET}" --format table | grep -q 'fake'
 "${WRAPPER}" reload --socket "${SOCKET}" | grep -q '"ok": true'
+
+mkfifo "${TMP_DIR}/client.stdin"
+"${WRAPPER}" client --socket "${SOCKET}" --name fake <"${TMP_DIR}/client.stdin" >"${TMP_DIR}/held-client.out" &
+HELD_CLIENT_PID=$!
+exec 3>"${TMP_DIR}/client.stdin"
+printf '%s\n' '{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"held-client","version":"0"}}}' >&3
+
+for _ in {1..100}; do
+  "${WRAPPER}" status --socket "${SOCKET}" >"${STATUS_JSON}"
+  grep -q '"active_clients":' "${STATUS_JSON}" && break
+  sleep 0.05
+done
+grep -q '"active_clients":' "${STATUS_JSON}"
+
+if "${WRAPPER}" reload --socket "${SOCKET}" >"${TMP_DIR}/reload-busy.out" 2>/dev/null; then
+  echo "reload without --force unexpectedly succeeded with an active client"
+  exit 1
+fi
+grep -q 'reload busy' "${TMP_DIR}/reload-busy.out"
+"${WRAPPER}" reload --socket "${SOCKET}" --force | grep -q '"ok": true'
+exec 3>&-
+wait "${HELD_CLIENT_PID}" 2>/dev/null || true
+
 "${WRAPPER}" stop --socket "${SOCKET}" | grep -q '"ok": true'
 wait "${DAEMON_PID}"
 DAEMON_PID=""

@@ -188,9 +188,15 @@ lazy-mcp-wrapper stop \
 ```bash
 lazy-mcp-wrapper reload \
   --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+
+lazy-mcp-wrapper reload \
+  --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock \
+  --force
 ```
 
 只有通过 `--daemon-config` 启动的 daemon 支持热重载。reload 会重新读取 daemon 配置文件，构建新的 MCP 代理集合，成功后关闭旧真实 MCP 进程和旧日志文件。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。
+
+默认 reload 是保守策略：如果存在活跃 client，会返回 busy，不替换代理。需要立即替换时使用 `--force`，但它可能打断当前连接正在使用的旧真实 MCP。
 
 Codex 配置示例：
 
@@ -296,6 +302,6 @@ make uninstall-agent
 
 第二阶段可以考虑：
 
-- reload 安全策略：busy 检测或 graceful reload。
+- graceful reload：新连接走新代理，旧连接自然结束。
 - Playwright session 隔离。
 - 与其他 MCP 客户端共享，不局限于 Codex。

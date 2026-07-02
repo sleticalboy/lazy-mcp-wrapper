@@ -274,6 +274,7 @@ lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --format table
 lazy-mcp-wrapper stop --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 ```
 
 `status` 会输出 daemon 配置路径、daemon pid、启动时间、运行时长、当前 client 数、活跃 client session、已转发调用数、最近错误和各 MCP 运行状态。
@@ -282,7 +283,7 @@ lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
 
 `stop` 会请求 daemon 退出。如果使用 LaunchAgent 管理，launchd 会按配置重新拉起。
 
-`reload` 只支持通过 `--daemon-config` 启动的 daemon，会重新读取 daemon 配置文件并替换 MCP 代理。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。
+`reload` 只支持通过 `--daemon-config` 启动的 daemon，会重新读取 daemon 配置文件并替换 MCP 代理。手动 `daemon --config ...` 模式没有可重载源，会返回明确错误。默认情况下，如果存在活跃 client，reload 会返回 busy；使用 `--force` 才会强制替换代理并关闭旧真实 MCP 进程。
 
 ## 缓存
 

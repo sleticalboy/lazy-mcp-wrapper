@@ -103,7 +103,11 @@ func QueryStatus(socketPath string) (Status, error) {
 	return status, nil
 }
 
-func SendControl(socketPath, control string) (ControlResponse, error) {
+type ControlOptions struct {
+	Force bool
+}
+
+func SendControl(socketPath, control string, opts ...ControlOptions) (ControlResponse, error) {
 	if socketPath == "" {
 		return ControlResponse{}, fmt.Errorf("socket path is required")
 	}
@@ -117,7 +121,11 @@ func SendControl(socketPath, control string) (ControlResponse, error) {
 	}
 	defer conn.Close()
 
-	bind, _ := json.Marshal(BindRequest{Control: control})
+	var options ControlOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	bind, _ := json.Marshal(BindRequest{Control: control, Force: options.Force})
 	if _, err := conn.Write(append(bind, '\n')); err != nil {
 		return ControlResponse{}, err
 	}

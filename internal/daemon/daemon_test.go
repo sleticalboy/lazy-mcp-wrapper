@@ -410,6 +410,89 @@ func TestControlReloadFromDaemonConfig(t *testing.T) {
 	}
 }
 
+func TestControlReloadBusyRequiresForce(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+	fakeMCP := buildFakeMCP(t, tempDir)
+
+	firstConfigPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "first", Command: fakeMCP})
+	daemonConfigPath := writeDaemonConfig(t, tempDir, socketPath, []string{firstConfigPath})
+	server, err := NewServerFromConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("NewServerFromConfig() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial socket: %v", err)
+	}
+	defer conn.Close()
+	bind, _ := json.Marshal(BindRequest{Name: "first"})
+	if _, err := conn.Write(append(bind, '\n')); err != nil {
+		t.Fatalf("write bind: %v", err)
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read bind response: %v", err)
+	}
+	var bindResp BindResponse
+	if err := json.Unmarshal(line, &bindResp); err != nil {
+		t.Fatalf("decode bind response: %v", err)
+	}
+	if !bindResp.OK {
+		t.Fatalf("bind response = %#v, want ok", bindResp)
+	}
+
+	secondConfigPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "second", Command: fakeMCP})
+	writeDaemonConfig(t, tempDir, socketPath, []string{secondConfigPath})
+
+	resp, err := SendControl(socketPath, "reload")
+	if err != nil {
+		t.Fatalf("SendControl(reload) error = %v", err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "reload busy") {
+		t.Fatalf("SendControl(reload) = %#v, want busy", resp)
+	}
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "first" {
+		t.Fatalf("unexpected servers after busy reload: %#v", status.Servers)
+	}
+
+	resp, err = SendControl(socketPath, "reload", ControlOptions{Force: true})
+	if err != nil {
+		t.Fatalf("SendControl(force reload) error = %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("SendControl(force reload) = %#v, want ok", resp)
+	}
+
+	status, err = QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "second" {
+		t.Fatalf("unexpected servers after force reload: %#v", status.Servers)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func TestControlStop(t *testing.T) {
 	socketPath := testSocketPath(t)
 	defer os.Remove(socketPath)
