@@ -163,6 +163,12 @@ Expected behavior:
 - Repeated calls within `idle_timeout` reuse the same real MCP process.
 - The real MCP process exits after `idle_timeout` or when the wrapper exits.
 
+Shared daemon status:
+
+```bash
+/Users/binlee/.local/bin/lazy-mcp-wrapper status --socket /Users/binlee/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
 Local smoke commands:
 
 ```bash

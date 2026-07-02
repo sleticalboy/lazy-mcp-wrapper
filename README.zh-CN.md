@@ -258,6 +258,14 @@ logs:   ~/Library/Logs/lazy-mcp-wrapper
 lazy-mcp-wrapper --config ./examples/context7.json --inspect
 ```
 
+查看 shared daemon 运行状态：
+
+```bash
+lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
+输出会包含已注册 MCP、真实 MCP 是否已经启动、真实进程 pid 和最近使用时间。
+
 刷新缓存：
 
 ```bash

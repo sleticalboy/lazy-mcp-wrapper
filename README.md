@@ -87,6 +87,12 @@ Inspect resolved configuration and cache status:
 lazy-mcp-wrapper --config ./examples/context7.json --inspect
 ```
 
+Inspect shared daemon runtime status:
+
+```bash
+lazy-mcp-wrapper status --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
 ## Notes
 
 `node_repl` is intentionally not a good fit for this wrapper because it keeps state between calls. Keep it configured directly unless you are fine with losing REPL state.

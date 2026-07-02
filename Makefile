@@ -16,7 +16,8 @@ smoke: build
 
 install: build
 	install -d $(BINDIR)
-	install -m 0755 bin/$(BINARY) $(BINDIR)/$(BINARY)
+	install -m 0755 bin/$(BINARY) $(BINDIR)/$(BINARY).tmp
+	mv $(BINDIR)/$(BINARY).tmp $(BINDIR)/$(BINARY)
 	@echo "installed $(BINDIR)/$(BINARY)"
 
 install-agent:

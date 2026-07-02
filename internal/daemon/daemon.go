@@ -10,13 +10,20 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
 )
 
 type BindRequest struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	Control string `json:"control"`
+}
+
+type Status struct {
+	SocketPath string                `json:"socket_path"`
+	Servers    []wrapper.ProxyStatus `json:"servers"`
 }
 
 type Server struct {
@@ -98,6 +105,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	var bind BindRequest
 	if err := json.Unmarshal(line, &bind); err != nil || bind.Name == "" {
+		if bind.Control == "status" {
+			_ = s.writeStatus(conn)
+			return
+		}
 		_ = writeBindError(conn, "invalid bind request")
 		return
 	}
@@ -120,6 +131,35 @@ func (s *Server) proxy(name string) *wrapper.Proxy {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.proxies[name]
+}
+
+func (s *Server) Status() Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	names := make([]string, 0, len(s.proxies))
+	for name := range s.proxies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	status := Status{
+		SocketPath: s.socketPath,
+		Servers:    make([]wrapper.ProxyStatus, 0, len(names)),
+	}
+	for _, name := range names {
+		status.Servers = append(status.Servers, s.proxies[name].Status())
+	}
+	return status
+}
+
+func (s *Server) writeStatus(w io.Writer) error {
+	data, err := json.Marshal(s.Status())
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(data, '\n'))
+	return err
 }
 
 func writeBindOK(w io.Writer) error {

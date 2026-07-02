@@ -69,6 +69,40 @@ func RunClient(socketPath, name string, stdin io.Reader, stdout io.Writer) error
 	return nil
 }
 
+func QueryStatus(socketPath string) (Status, error) {
+	if socketPath == "" {
+		return Status{}, fmt.Errorf("socket path is required")
+	}
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return Status{}, err
+	}
+	defer conn.Close()
+
+	bind, _ := json.Marshal(BindRequest{Control: "status"})
+	if _, err := conn.Write(append(bind, '\n')); err != nil {
+		return Status{}, err
+	}
+
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		return Status{}, err
+	}
+	var bindResp BindResponse
+	if err := json.Unmarshal(line, &bindResp); err == nil && !bindResp.OK && bindResp.Error != "" {
+		return Status{}, errors.New(bindResp.Error)
+	}
+	var status Status
+	if err := json.Unmarshal(line, &status); err != nil {
+		return Status{}, err
+	}
+	if status.SocketPath == "" && status.Servers == nil {
+		return Status{}, fmt.Errorf("invalid status response")
+	}
+	return status, nil
+}
+
 func closeWrite(conn net.Conn) error {
 	type closeWriter interface {
 		CloseWrite() error

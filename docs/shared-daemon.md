@@ -128,6 +128,20 @@ lazy-mcp-wrapper client \
   --name context7
 ```
 
+查看 daemon 状态：
+
+```bash
+lazy-mcp-wrapper status \
+  --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock
+```
+
+状态输出包含：
+
+- 已注册 MCP 名称。
+- 真实 MCP 是否已启动。
+- 真实 MCP pid。
+- 最近使用时间。
+
 Codex 配置示例：
 
 ```toml
@@ -230,7 +244,6 @@ make uninstall-agent
 
 第二阶段可以考虑：
 
-- `status` 命令查看当前 MCP 状态。
 - `stop` / `reload` 命令。
 - 请求级日志和 client id。
 - Playwright session 隔离。

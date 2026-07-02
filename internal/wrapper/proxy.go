@@ -37,6 +37,14 @@ type ProxyOptions struct {
 	KeepRealOnClientClose bool
 }
 
+type ProxyStatus struct {
+	Name       string     `json:"name"`
+	HasReal    bool       `json:"has_real"`
+	RealPID    int        `json:"real_pid,omitempty"`
+	RealAlive  bool       `json:"real_alive"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
 func NewProxy(cfg Config, logger *log.Logger) *Proxy {
 	return &Proxy{cfg: cfg, log: logger}
 }
@@ -235,6 +243,28 @@ func (p *Proxy) stopReal() {
 	}
 }
 
+func (p *Proxy) Status() ProxyStatus {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	status := ProxyStatus{Name: p.cfg.Name}
+	if p.client == nil {
+		return status
+	}
+	if !p.client.alive() {
+		_ = p.client.close()
+		p.client = nil
+		return status
+	}
+	status.HasReal = true
+	status.RealAlive = true
+	status.RealPID = p.client.pid()
+	if lastUsedAt := p.client.lastUsedAt(); !lastUsedAt.IsZero() {
+		status.LastUsedAt = &lastUsedAt
+	}
+	return status
+}
+
 type realClient struct {
 	cfg       Config
 	log       *log.Logger
@@ -247,6 +277,7 @@ type realClient struct {
 	mu        sync.Mutex
 	nextID    int64
 	timer     *time.Timer
+	lastUsed  time.Time
 }
 
 type initRequest struct {
@@ -420,6 +451,7 @@ func (c *realClient) touch() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.lastUsed = time.Now()
 	if c.timer == nil {
 		c.timer = time.AfterFunc(c.cfg.IdleTimeout.Duration, func() {
 			c.log.Printf("idle timeout reached, stopping real MCP %s", c.cfg.Name)
@@ -437,6 +469,19 @@ func (c *realClient) alive() bool {
 	default:
 		return true
 	}
+}
+
+func (c *realClient) pid() int {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return 0
+	}
+	return c.cmd.Process.Pid
+}
+
+func (c *realClient) lastUsedAt() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastUsed
 }
 
 func (c *realClient) close() error {

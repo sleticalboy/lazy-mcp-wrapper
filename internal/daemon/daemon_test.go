@@ -130,6 +130,49 @@ func TestClientUnknownName(t *testing.T) {
 	}
 }
 
+func TestQueryStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	fakeMCP := buildFakeMCP(t, tempDir)
+	defer os.Remove(socketPath)
+	cfg := wrapper.Config{Name: "fake", Command: fakeMCP}
+	cfg.IdleTimeout.Duration = time.Second
+	cfg.StartupTimeout.Duration = 5 * time.Second
+	cfg.CallTimeout.Duration = 5 * time.Second
+
+	server, err := NewServer(socketPath, []wrapper.Config{cfg}, nil)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if status.SocketPath != socketPath {
+		t.Fatalf("socket path = %q, want %q", status.SocketPath, socketPath)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "fake" {
+		t.Fatalf("unexpected servers: %#v", status.Servers)
+	}
+	if status.Servers[0].HasReal {
+		t.Fatalf("expected no real MCP before tool call: %#v", status.Servers[0])
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func buildFakeMCP(t *testing.T, tempDir string) string {
 	t.Helper()
 	path := filepath.Join(tempDir, "fake-mcp")
