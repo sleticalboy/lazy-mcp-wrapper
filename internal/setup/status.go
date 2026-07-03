@@ -1,7 +1,5 @@
 package setup
 
-import "path/filepath"
-
 type StatusReport struct {
 	WrapperDir    string
 	WrapperCount  int
@@ -22,7 +20,7 @@ type ClientStatus struct {
 
 func Status(opts Options) StatusReport {
 	opts = normalizeOptions(opts)
-	wrapperDir := filepath.Join(opts.Home, wrappersRel)
+	wrapperDir := wrappersDir(opts.Home)
 	wrappers, _ := listWrapperConfigs(wrapperDir)
 	socketPath := currentDaemonSocket(opts.Home)
 

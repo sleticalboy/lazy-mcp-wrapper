@@ -12,7 +12,7 @@ func TestStatusReportsWrappersDaemonAndClients(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	socketPath := filepath.Join(home, socketRel)
+	socketPath := socketPath(home)
 	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.context7]
 type = "stdio"
 command = "/bin/lazy-mcp-wrapper"
@@ -25,7 +25,7 @@ args = ["raw"]
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	wrapperDir := filepath.Join(home, wrappersRel)
+	wrapperDir := wrappersDir(home)
 	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,7 @@ args = ["@playwright/mcp@latest"]
 	if len(plan.ClientUpdates) != 1 {
 		t.Fatalf("client updates = %#v", plan.ClientUpdates)
 	}
-	if plan.DaemonConfig.SocketPath != filepath.Join(home, socketRel) {
+	if plan.DaemonConfig.SocketPath != socketPath(home) {
 		t.Fatalf("socket path = %s", plan.DaemonConfig.SocketPath)
 	}
 }
@@ -83,14 +83,14 @@ args = ["-y","@upstash/context7-mcp"]
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(home, wrappersRel, "context7.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(wrappersDir(home), "context7.json")); err != nil {
 		t.Fatalf("wrapper config missing: %v", err)
 	}
 	var daemonConfig struct {
 		Socket  string   `json:"socket"`
 		Configs []string `json:"configs"`
 	}
-	data, err := os.ReadFile(filepath.Join(home, daemonRel))
+	data, err := os.ReadFile(daemonConfigPath(home))
 	if err != nil {
 		t.Fatalf("daemon config missing: %v", err)
 	}

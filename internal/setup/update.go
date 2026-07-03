@@ -22,7 +22,7 @@ type UpdatePlan struct {
 
 func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 	opts = normalizeOptions(opts)
-	wrapperDir := filepath.Join(opts.Home, wrappersRel)
+	wrapperDir := wrappersDir(opts.Home)
 	existing, err := listWrapperConfigs(wrapperDir)
 	if err != nil {
 		return UpdatePlan{}, err

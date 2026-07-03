@@ -98,21 +98,12 @@ func removeWrapperRefs(servers []RawServer, socketPath string) []RawServer {
 	return out
 }
 
-func sortedConfigPaths(configs []existingWrapperConfig) []string {
-	paths := make([]string, 0, len(configs))
-	for _, cfg := range configs {
-		paths = append(paths, cfg.Path)
-	}
-	sort.Strings(paths)
-	return paths
-}
-
 func currentDaemonSocket(home string) string {
-	configPath := filepath.Join(home, daemonRel)
+	configPath := daemonConfigPath(home)
 	if cfg, err := loadDaemonConfigLoose(configPath); err == nil && cfg.SocketPath != "" {
 		return cfg.SocketPath
 	}
-	return filepath.Join(home, socketRel)
+	return socketPath(home)
 }
 
 func loadDaemonConfigLoose(path string) (DaemonConfigPlan, error) {

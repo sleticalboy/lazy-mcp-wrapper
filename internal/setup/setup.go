@@ -18,9 +18,6 @@ import (
 
 const (
 	defaultLabel = "com.binlee.lazy-mcp-wrapper"
-	socketRel    = ".lazy-mcp-wrapper/lazy-mcpd.sock"
-	daemonRel    = ".lazy-mcp-wrapper/config.json"
-	wrappersRel  = ".lazy-mcp-wrapper/wrappers"
 	httpPortBase = 54300
 )
 
@@ -109,8 +106,8 @@ func NewPlan(opts Options) (Plan, error) {
 	}
 	sort.Strings(names)
 
-	wrapperDir := filepath.Join(opts.Home, wrappersRel)
-	usedPorts := existingLocalPorts(existingDaemonConfigPaths(filepath.Join(opts.Home, daemonRel)))
+	wrapperDir := wrappersDir(opts.Home)
+	usedPorts := existingLocalPorts(existingDaemonConfigPaths(daemonConfigPath(opts.Home)))
 	for _, name := range names {
 		server := wrappable[name]
 		configPath := filepath.Join(wrapperDir, safeName(name)+".json")
@@ -129,8 +126,8 @@ func NewPlan(opts Options) (Plan, error) {
 		})
 	}
 
-	socketPath := filepath.Join(opts.Home, socketRel)
-	daemonConfigPath := filepath.Join(opts.Home, daemonRel)
+	socketPath := socketPath(opts.Home)
+	daemonConfigPath := daemonConfigPath(opts.Home)
 	mergedConfigPaths := mergeConfigPaths(existingDaemonConfigPaths(daemonConfigPath), configPaths(plan.WrapperConfigs))
 	if len(mergedConfigPaths) == 0 {
 		plan.Blockers = append(plan.Blockers, "no wrappable stdio MCP servers found")
@@ -181,12 +178,12 @@ func (p Plan) Apply(opts Options) error {
 		return fmt.Errorf("setup has blockers: %s", strings.Join(p.Blockers, "; "))
 	}
 
-	if len(p.WrapperConfigs) > 0 && shouldApply(opts, "Step 1/3: Create wrapper configs in "+filepath.Join(opts.Home, wrappersRel)+"?") {
+	if len(p.WrapperConfigs) > 0 && shouldApply(opts, "Step 1/3: Create wrapper configs in "+wrappersDir(opts.Home)+"?") {
 		if err := writeWrapperConfigs(p.WrapperConfigs); err != nil {
 			return err
 		}
 	}
-	if shouldApply(opts, "Step 2/3: Install daemon as macOS LaunchAgent?") {
+	if shouldApply(opts, daemonSetupPrompt()) {
 		if err := writeDaemonConfig(p.DaemonConfig); err != nil {
 			return err
 		}
@@ -213,6 +210,13 @@ func (p Plan) Apply(opts Options) error {
 		}
 	}
 	return nil
+}
+
+func daemonSetupPrompt() string {
+	if currentGOOS == "windows" {
+		return "Step 2/3: Write daemon config?"
+	}
+	return "Step 2/3: Install daemon as macOS LaunchAgent?"
 }
 
 func (o Options) execFunc() execFunc {
@@ -405,8 +409,8 @@ func buildDaemonConfigContent(socketPath string, configPaths []string) ([]byte, 
 }
 
 func defaultDaemonConfigPlan(home string, configPaths []string) (DaemonConfigPlan, error) {
-	configPath := filepath.Join(home, daemonRel)
-	socketPath := filepath.Join(home, socketRel)
+	configPath := daemonConfigPath(home)
+	socketPath := socketPath(home)
 	if cfg, err := daemon.LoadConfig(configPath); err == nil && cfg.SocketPath != "" {
 		socketPath = cfg.SocketPath
 	}
@@ -424,10 +428,10 @@ func defaultDaemonConfigPlan(home string, configPaths []string) (DaemonConfigPla
 
 func defaultLaunchAgentPlan(opts Options) LaunchAgentPlan {
 	opts = normalizeOptions(opts)
-	plistPath := filepath.Join(opts.Home, "Library", "LaunchAgents", defaultLabel+".plist")
-	socketPath := filepath.Join(opts.Home, socketRel)
-	daemonConfigPath := filepath.Join(opts.Home, daemonRel)
-	logDir := filepath.Join(opts.Home, "Library", "Logs", "lazy-mcp-wrapper")
+	plistPath := launchAgentPath(opts.Home)
+	socketPath := socketPath(opts.Home)
+	daemonConfigPath := daemonConfigPath(opts.Home)
+	logDir := logDir(opts.Home)
 	pathValue := os.Getenv("PATH")
 	plan := LaunchAgentPlan{
 		Label:              defaultLabel,

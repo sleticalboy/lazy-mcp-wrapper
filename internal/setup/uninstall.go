@@ -28,7 +28,7 @@ func NewUninstallPlan(opts Options) (UninstallPlan, error) {
 	socketPath := currentDaemonSocket(opts.Home)
 	plan := UninstallPlan{
 		LaunchAgent: defaultLaunchAgentPlan(opts),
-		WrapperDir:  filepath.Join(opts.Home, wrappersRel),
+		WrapperDir:  wrappersDir(opts.Home),
 	}
 	for _, adapter := range scanClients(opts.Home) {
 		restore := ClientRestorePlan{

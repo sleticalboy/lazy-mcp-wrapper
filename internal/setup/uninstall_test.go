@@ -31,7 +31,7 @@ args = ["client","--name","context7"]
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
-	wrapperDir := filepath.Join(home, wrappersRel)
+	wrapperDir := wrappersDir(home)
 	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ args = ["client","--name","context7"]
 
 func TestUninstallRemovesWrapperRefsWithoutBackup(t *testing.T) {
 	home := t.TempDir()
-	socketPath := filepath.Join(home, socketRel)
+	socketPath := socketPath(home)
 	codexPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
 		t.Fatal(err)

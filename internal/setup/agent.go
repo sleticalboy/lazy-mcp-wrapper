@@ -45,6 +45,10 @@ func buildPlistXML(plan LaunchAgentPlan) string {
 }
 
 func installLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
+	if currentGOOS == "windows" {
+		fmt.Fprintf(os.Stderr, "note: daemon auto-start is not supported on Windows; start manually with: lazy-mcp-wrapper daemon --daemon-config %s\n", plan.DaemonConfig)
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(plan.PlistPath), 0755); err != nil {
 		return err
 	}
@@ -76,6 +80,10 @@ func installLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 }
 
 func uninstallLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
+	if currentGOOS == "windows" {
+		fmt.Fprintln(os.Stderr, "note: daemon auto-start is not supported on Windows; skipping LaunchAgent removal")
+		return nil
+	}
 	if execer == nil {
 		execer = realExec
 	}

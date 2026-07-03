@@ -9,7 +9,7 @@ import (
 
 func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
 	home := t.TempDir()
-	socketPath := filepath.Join(home, socketRel)
+	socketPath := socketPath(home)
 	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
 	if err := os.MkdirAll(filepath.Dir(cursorPath), 0755); err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
 	if err := os.WriteFile(cursorPath, originalClientConfig, 0644); err != nil {
 		t.Fatal(err)
 	}
-	wrapperDir := filepath.Join(home, wrappersRel)
+	wrapperDir := wrappersDir(home)
 	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wrapperDir, "old-tool.json")); !os.IsNotExist(err) {
 		t.Fatalf("old wrapper still exists: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(home, daemonRel))
+	data, err := os.ReadFile(daemonConfigPath(home))
 	if err != nil {
 		t.Fatalf("daemon config missing: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
 
 func TestUpdateBlocksWhenNoWrapperConfigsRemain(t *testing.T) {
 	home := t.TempDir()
-	wrapperDir := filepath.Join(home, wrappersRel)
+	wrapperDir := wrappersDir(home)
 	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
 		t.Fatal(err)
 	}
