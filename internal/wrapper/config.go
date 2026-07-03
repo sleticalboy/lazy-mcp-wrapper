@@ -9,7 +9,13 @@ import (
 	"github.com/binlee/lazy-mcp-wrapper/internal/jsonrpc"
 )
 
+const configSchemaVersion = 1
+
+// CurrentSchemaVersion is the schema version written to new config files.
+const CurrentSchemaVersion = configSchemaVersion
+
 type Config struct {
+	SchemaVersion  int               `json:"schema_version,omitempty"`
 	Name           string            `json:"name"`
 	Sharing        string            `json:"sharing"`
 	Command        string            `json:"command"`
@@ -60,6 +66,12 @@ func LoadConfig(path string) (Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, err
+	}
+	// 旧版 config 无 schema_version，兼容读取；新版写入时会带上版本号
+	if cfg.SchemaVersion == 0 {
+		cfg.SchemaVersion = configSchemaVersion
+	} else if cfg.SchemaVersion > configSchemaVersion {
+		return Config{}, fmt.Errorf("config schema version %d is newer than supported version %d; please upgrade lazy-mcp-wrapper", cfg.SchemaVersion, configSchemaVersion)
 	}
 	if cfg.Name == "" {
 		return Config{}, fmt.Errorf("config name is required")

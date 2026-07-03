@@ -347,6 +347,9 @@ func (p *Proxy) ensureStdioReal(ctx context.Context) (realBackend, error) {
 	}
 	client, err := startReal(ctx, p.cfg, p.log, init)
 	if err != nil {
+		if p.cfg.LogFile != "" {
+			return nil, fmt.Errorf("%w\n  check logs: tail -f %s", err, p.cfg.LogFile)
+		}
 		return nil, err
 	}
 	p.client = client
@@ -379,6 +382,9 @@ func (p *Proxy) ensureHTTPReal(ctx context.Context) (realBackend, error) {
 	}
 	client, err := startHTTPReal(ctx, p.cfg, p.log, init)
 	if err != nil {
+		if p.cfg.LogFile != "" {
+			return nil, fmt.Errorf("%w\n  check logs: tail -f %s", err, p.cfg.LogFile)
+		}
 		return nil, err
 	}
 	p.client = client

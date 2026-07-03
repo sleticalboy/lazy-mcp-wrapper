@@ -425,7 +425,7 @@ func runSetup(args []string) {
 		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stdout, "\nDone. Verify with: %s status --socket %s --format table\n", filepath.Base(bin), plan.DaemonConfig.SocketPath)
+	fmt.Fprintf(os.Stdout, "\nDone. Run `%s setup verify` to confirm all servers are reachable.\n", filepath.Base(bin))
 }
 
 type multiFlag []string

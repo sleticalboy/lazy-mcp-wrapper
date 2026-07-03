@@ -250,6 +250,7 @@ func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 		sharing = "session"
 	}
 	cfg := wrapper.Config{
+		SchemaVersion:  wrapper.CurrentSchemaVersion,
 		Name:           server.Name,
 		Sharing:        sharing,
 		RealProtocol:   "2024-11-05",
