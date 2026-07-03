@@ -1,8 +1,8 @@
 BINARY := lazy-mcp-wrapper
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
-GOCACHE ?= /private/tmp/lazy-mcp-wrapper-gocache
-GOMODCACHE ?= /private/tmp/lazy-mcp-wrapper-gomodcache
+GOCACHE ?= /tmp/lazy-mcp-wrapper-gocache
+GOMODCACHE ?= /tmp/lazy-mcp-wrapper-gomodcache
 GIT_TAG := $(shell git describe --tags --exact-match 2>/dev/null || echo dev)
 BUILD_FLAGS := -ldflags "-X main.version=$(GIT_TAG)"
 DIST_TARGETS := darwin-arm64 darwin-amd64 linux-amd64
