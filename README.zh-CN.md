@@ -21,13 +21,13 @@ lazy-mcp-wrapper setup status
 ## 它解决什么问题
 
 - 降低 Context7、Playwright、MasterGo 等 MCP 的空闲内存占用。
-- 避免 Codex 等客户端启动时直接拉起所有 stdio MCP。
+- 避免 Codex 等客户端启动时直接拉起所有 stdio MCP 或远程 HTTP MCP 代理链路。
 - 缓存 `tools/list`，让客户端发现工具时不必反复启动重型 MCP 进程。
 - 通过本地 daemon 让多个 Codex CLI 会话共享无状态 MCP。
 - 对 Playwright 这类有状态 MCP 使用 `sharing: "session"`，避免浏览器上下文互相污染。
 - 提供 `setup`、`setup status`、`setup update`、`setup uninstall`，配置可检查、可更新、可回滚。
 
-当前主要支持 stdio MCP。HTTP/SSE 支持在 [docs/roadmap.md](./docs/roadmap.md) 中跟踪。
+当前支持 stdio MCP 和远程 HTTP MCP。远程 HTTP 默认使用 `streamable-http`；旧版 HTTP+SSE 仅作为兼容模式保留。
 
 适合包装这类 MCP：
 
@@ -167,6 +167,27 @@ PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 - `header`：标准 MCP `Content-Length` 帧格式，默认值。
 - `jsonl`：每行一个 JSON-RPC 消息。当前 Context7、Playwright MCP、MasterGo Magic MCP 示例都使用这个模式。
 
+### 远程 HTTP MCP
+
+`lazy-mcp-wrapper` 也可以代理远程 HTTP MCP。推荐协议是 MCP 2025-03-26 标准里的 `streamable-http`：
+
+```json
+{
+  "name": "my-remote-mcp",
+  "url": "https://example.com/mcp",
+  "protocol": "streamable-http"
+}
+```
+
+`protocol` 字段支持：
+
+| 值 | 说明 |
+| --- | --- |
+| `streamable-http` | 推荐值。MCP 2025-03-26 标准；省略 `protocol` 时默认使用它。 |
+| `sse` | 已废弃的旧版 HTTP+SSE 传输，仅用于兼容旧服务。 |
+
+`setup` 包装远程 HTTP MCP 时，会通过共享 daemon 启动本地 HTTP proxy，并把客户端配置改写到类似 `http://127.0.0.1:54300` 的本地地址。端口会从 `54300` 开始自动递增分配，并写入生成的 wrapper config 的 `local_port` 字段。
+
 ## Codex 配置
 
 Codex 中不要直接配置真实 MCP，而是配置 wrapper。
@@ -299,7 +320,7 @@ lazy-mcp-wrapper setup
 lazy-mcp-wrapper setup --yes
 ```
 
-`setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它只包装 stdio MCP，HTTP/SSE 会原样保留，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。
+`setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它会包装 stdio MCP 和远程 HTTP MCP，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。远程 HTTP MCP 会通过 daemon 管理的本地 HTTP proxy 端口暴露给客户端。
 
 daemon 控制命令：
 

@@ -23,13 +23,13 @@ lazy-mcp-wrapper setup status
 ## What It Does
 
 - Reduces idle memory usage from MCP servers such as Context7, Playwright, and MasterGo.
-- Keeps stdio MCP servers out of the client startup path until `tools/call`, `resources/*`, or `prompts/*` needs the real server.
+- Keeps stdio and remote HTTP MCP servers out of the client startup path until `tools/call`, `resources/*`, or `prompts/*` needs the real server.
 - Caches `tools/list` so clients can discover tools without repeatedly starting heavy MCP processes.
 - Shares stateless MCP servers through a local daemon across multiple Codex CLI sessions.
 - Preserves stateful MCP isolation with `sharing: "session"` for servers such as Playwright.
 - Provides `setup`, `setup status`, `setup update`, and `setup uninstall` for reversible client configuration.
 
-Current scope: stdio MCP servers and remote HTTP MCP servers.
+Current scope: stdio MCP servers and remote HTTP MCP servers. Remote HTTP defaults to `streamable-http`; legacy HTTP+SSE is supported only for compatibility.
 
 ## Build
 
@@ -100,6 +100,8 @@ The recommended protocol is `streamable-http` (MCP spec 2025-03-26):
   "protocol": "streamable-http"
 }
 ```
+
+When `setup` wraps a remote HTTP server, it starts a local HTTP proxy through the shared daemon and rewrites the client config to a local URL such as `http://127.0.0.1:54300`. Ports are assigned automatically from `54300` upward and stored as `local_port` in the generated wrapper config.
 
 The `protocol` field accepts:
 
@@ -178,7 +180,7 @@ Supported clients:
 - Claude Code: `~/.claude/settings.json`
 - Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-The command wraps stdio MCP servers, keeps HTTP/SSE servers unchanged, skips `node_repl`, and uses `sharing: "session"` for Playwright.
+The command wraps stdio MCP servers and remote HTTP MCP servers, skips `node_repl`, and uses `sharing: "session"` for Playwright. Remote HTTP servers are exposed to clients through local daemon-managed HTTP proxy ports.
 
 ## Shared Daemon Mode
 
