@@ -175,8 +175,10 @@ func isWrappable(server RawServer) bool {
 			}
 		}
 		return true
-	case "sse", "http", "streamable-http":
+	case "http", "streamable-http":
 		return server.URL != "" && !isHTTPWrapperRef(server)
+	case "sse":
+		return false // HTTP+SSE is no longer supported; use streamable-http
 	default:
 		return false
 	}

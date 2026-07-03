@@ -32,8 +32,8 @@ func TestJSONAdapterReadWriteServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadServers() error = %v", err)
 	}
-	// 阶段二打开了 HTTP/SSE 支持，remote (sse+url) 也应被标记为 wrappable
-	if len(servers) != 2 || !servers[0].IsWrappable || !servers[1].IsWrappable {
+	// SSE type is no longer wrappable; only stdio and streamable-http/http are supported
+	if len(servers) != 2 || !servers[0].IsWrappable || servers[1].IsWrappable {
 		t.Fatalf("servers = %#v", servers)
 	}
 

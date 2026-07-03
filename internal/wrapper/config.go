@@ -84,12 +84,11 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if cfg.URL != "" {
 		switch cfg.HTTPProtocol() {
-		case "sse", "streamable-http":
+		case "streamable-http":
+		case "sse":
+			return Config{}, fmt.Errorf("protocol %q (HTTP+SSE) is no longer supported; use \"streamable-http\" instead", cfg.Protocol)
 		default:
-			return Config{}, fmt.Errorf("config protocol must be sse, http, or streamable-http")
-		}
-		if cfg.HTTPProtocol() == "sse" {
-			fmt.Fprintln(os.Stderr, `warning: protocol "sse" (HTTP+SSE) is deprecated by MCP spec; use "streamable-http" instead`)
+			return Config{}, fmt.Errorf("config protocol must be streamable-http (got %q)", cfg.Protocol)
 		}
 	}
 	if cfg.Sharing == "" {

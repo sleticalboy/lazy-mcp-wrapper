@@ -77,18 +77,18 @@ func TestConfigHTTPDefaults(t *testing.T) {
 	}
 }
 
-func TestConfigAllowsDeprecatedSSEProtocol(t *testing.T) {
+func TestConfigRejectsSSEProtocol(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "http.json")
 	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","protocol":"sse"}`), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
+	_, err := LoadConfig(path)
+	if err == nil {
+		t.Fatal("LoadConfig() expected error for sse protocol, got nil")
 	}
-	if cfg.HTTPProtocol() != "sse" {
-		t.Fatalf("HTTPProtocol() = %q", cfg.HTTPProtocol())
+	if !strings.Contains(err.Error(), "no longer supported") {
+		t.Fatalf("LoadConfig() error = %v, want 'no longer supported'", err)
 	}
 }
 
