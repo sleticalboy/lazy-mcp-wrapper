@@ -76,6 +76,9 @@ func LoadConfig(path string) (Config, error) {
 		default:
 			return Config{}, fmt.Errorf("config protocol must be sse, http, or streamable-http")
 		}
+		if cfg.HTTPProtocol() == "sse" {
+			fmt.Fprintln(os.Stderr, `warning: protocol "sse" (HTTP+SSE) is deprecated by MCP spec; use "streamable-http" instead`)
+		}
 	}
 	if cfg.Sharing == "" {
 		cfg.Sharing = "shared"
@@ -122,10 +125,10 @@ func (c Config) Framing() (jsonrpc.Framing, error) {
 
 func (c Config) HTTPProtocol() string {
 	switch c.Protocol {
-	case "":
-		return "sse"
-	case "http":
+	case "", "http", "streamable-http":
 		return "streamable-http"
+	case "sse":
+		return "sse"
 	default:
 		return c.Protocol
 	}

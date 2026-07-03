@@ -69,11 +69,26 @@ func TestConfigHTTPDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	if cfg.HTTPProtocol() != "sse" {
+	if cfg.HTTPProtocol() != "streamable-http" {
 		t.Fatalf("HTTPProtocol() = %q", cfg.HTTPProtocol())
 	}
 	if cfg.Headers["Authorization"] != "Bearer secret" {
 		t.Fatalf("header expansion = %q", cfg.Headers["Authorization"])
+	}
+}
+
+func TestConfigAllowsDeprecatedSSEProtocol(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "http.json")
+	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","protocol":"sse"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.HTTPProtocol() != "sse" {
+		t.Fatalf("HTTPProtocol() = %q", cfg.HTTPProtocol())
 	}
 }
 

@@ -29,7 +29,7 @@ lazy-mcp-wrapper setup status
 - Preserves stateful MCP isolation with `sharing: "session"` for servers such as Playwright.
 - Provides `setup`, `setup status`, `setup update`, and `setup uninstall` for reversible client configuration.
 
-Current scope: stdio MCP servers. HTTP/SSE support is tracked in [docs/roadmap.md](./docs/roadmap.md).
+Current scope: stdio MCP servers and remote HTTP MCP servers.
 
 ## Build
 
@@ -86,6 +86,29 @@ type = "stdio"
 command = "/absolute/path/to/lazy-mcp-wrapper"
 args = ["--config", "/absolute/path/to/context7.json"]
 ```
+
+### Remote HTTP MCP Servers
+
+`lazy-mcp-wrapper` can proxy remote MCP servers over HTTP.
+
+The recommended protocol is `streamable-http` (MCP spec 2025-03-26):
+
+```json
+{
+  "name": "my-remote-mcp",
+  "url": "https://example.com/mcp",
+  "protocol": "streamable-http"
+}
+```
+
+The `protocol` field accepts:
+
+| Value | Description |
+|-------|-------------|
+| `streamable-http` | **Recommended.** MCP 2025-03-26 standard. Default when `protocol` is omitted. |
+| `sse` | **Deprecated.** Legacy HTTP+SSE transport. Supported for compatibility only. |
+
+> **`sse` (HTTP+SSE) is deprecated** by the MCP specification. It is supported for compatibility with legacy servers but should not be used for new deployments.
 
 ## Behavior
 
