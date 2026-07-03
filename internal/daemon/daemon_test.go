@@ -724,12 +724,20 @@ func buildFakeMCP(t *testing.T, tempDir string) string {
 	t.Helper()
 	path := filepath.Join(tempDir, "fake-mcp")
 	cmd := testCommand(t, "go", "build", "-o", path, "../../cmd/fake-mcp")
-	cmd.Env = append(os.Environ(), "GOCACHE=/private/tmp/lazy-mcp-wrapper-gocache")
+	cmd.Env = testGoEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build fake-mcp: %v\n%s", err, string(out))
 	}
 	return path
+}
+
+func testGoEnv() []string {
+	env := os.Environ()
+	if os.Getenv("GOCACHE") == "" {
+		env = append(env, "GOCACHE="+filepath.Join(os.TempDir(), "lazy-mcp-wrapper-gocache"))
+	}
+	return env
 }
 
 func testCommand(t *testing.T, name string, args ...string) *exec.Cmd {

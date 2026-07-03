@@ -90,9 +90,17 @@ func buildFakeMCP(t *testing.T, output string) {
 	fakeBuildCount.Add(1)
 	cmd := exec.Command("go", "build", "-o", output, "./cmd/fake-mcp")
 	cmd.Dir = repoRoot(t)
-	cmd.Env = append(os.Environ(), "GOCACHE=/private/tmp/lazy-mcp-wrapper-gocache")
+	cmd.Env = testGoEnv()
 	data, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("build fake MCP: %v\n%s", err, string(data))
 	}
+}
+
+func testGoEnv() []string {
+	env := os.Environ()
+	if os.Getenv("GOCACHE") == "" {
+		env = append(env, "GOCACHE="+filepath.Join(os.TempDir(), "lazy-mcp-wrapper-gocache"))
+	}
+	return env
 }
