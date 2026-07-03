@@ -710,7 +710,7 @@ func (c *realClient) close() error {
 	if c.cmd.Process == nil {
 		return nil
 	}
-	if err := c.cmd.Process.Signal(os.Interrupt); err != nil {
+	if err := c.signalStop(); err != nil {
 		_ = c.cmd.Process.Kill()
 		return err
 	}

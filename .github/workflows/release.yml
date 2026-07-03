@@ -35,8 +35,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          shasum -a 256 *.tar.gz > SHA256SUMS
-          for file in *.tar.gz; do
+          shasum -a 256 *.tar.gz *.zip > SHA256SUMS
+          for file in *.tar.gz *.zip; do
             shasum -a 256 "$file" > "$file.sha256"
           done
 
@@ -45,6 +45,7 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/*.zip
             dist/*.sha256
             dist/SHA256SUMS
 

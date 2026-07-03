@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -188,7 +187,7 @@ func runDaemon(args []string) {
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals...)
 	defer stop()
 	fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper daemon listening on %s\n", *socketPath)
 	if err := server.Serve(ctx); err != nil {

@@ -5,9 +5,9 @@ GOCACHE ?= /tmp/lazy-mcp-wrapper-gocache
 GOMODCACHE ?= /tmp/lazy-mcp-wrapper-gomodcache
 GIT_TAG := $(shell git describe --tags --exact-match 2>/dev/null || echo dev)
 BUILD_FLAGS := -ldflags "-X main.version=$(GIT_TAG)"
-DIST_TARGETS := darwin-arm64 darwin-amd64 linux-amd64
+DIST_TARGETS := darwin-arm64 darwin-amd64 linux-amd64 windows-amd64
 
-.PHONY: build test smoke smoke-shared-daemon smoke-playwright-session install install-agent uninstall-agent dist dist-darwin-arm64 dist-darwin-amd64 dist-linux-amd64 clean
+.PHONY: build test smoke smoke-shared-daemon smoke-playwright-session install install-agent uninstall-agent dist dist-darwin-arm64 dist-darwin-amd64 dist-linux-amd64 dist-windows-amd64 clean
 
 build:
 	GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go build $(BUILD_FLAGS) -o bin/$(BINARY) ./cmd/lazy-mcp-wrapper
@@ -54,6 +54,11 @@ dist-linux-amd64:
 	@mkdir -p dist
 	GOOS=linux GOARCH=amd64 GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go build $(BUILD_FLAGS) -o dist/$(BINARY)-linux-amd64 ./cmd/lazy-mcp-wrapper
 	tar -czf dist/$(BINARY)-linux-amd64.tar.gz -C dist $(BINARY)-linux-amd64
+
+dist-windows-amd64:
+	@mkdir -p dist
+	GOOS=windows GOARCH=amd64 GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) go build $(BUILD_FLAGS) -o dist/$(BINARY)-windows-amd64.exe ./cmd/lazy-mcp-wrapper
+	cd dist && zip $(BINARY)-windows-amd64.zip $(BINARY)-windows-amd64.exe
 
 clean:
 	rm -rf bin dist tmp
