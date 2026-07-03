@@ -1,0 +1,21 @@
+{
+    "version": "VERSION",
+    "description": "Lazy-loads MCP servers on demand",
+    "homepage": "https://github.com/binlee/lazy-mcp-wrapper",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/binlee/lazy-mcp-wrapper/releases/download/vVERSION/lazy-mcp-wrapper-windows-amd64.zip",
+            "hash": "HASH"
+        }
+    },
+    "bin": "lazy-mcp-wrapper-windows-amd64.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/binlee/lazy-mcp-wrapper/releases/download/v$version/lazy-mcp-wrapper-windows-amd64.zip"
+            }
+        }
+    }
+}

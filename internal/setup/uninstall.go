@@ -67,7 +67,7 @@ func Uninstall(opts Options) error {
 	if opts.DryRun {
 		return nil
 	}
-	if shouldApply(opts, "Step 1/3: Stop and remove LaunchAgent?") {
+	if shouldApply(opts, uninstallDaemonPrompt()) {
 		if err := uninstallLaunchAgent(plan.LaunchAgent, opts.execFunc()); err != nil {
 			return err
 		}
@@ -106,7 +106,12 @@ func Uninstall(opts Options) error {
 }
 
 func PrintUninstallPlan(out io.Writer, plan UninstallPlan) {
-	fmt.Fprintf(out, "LaunchAgent: %s\n", plan.LaunchAgent.PlistPath)
+	if currentGOOS == "windows" {
+		fmt.Fprintln(out, "Windows Service: lazy-mcp-wrapper")
+		fmt.Fprintln(out, "note: Run setup uninstall from an elevated terminal (Administrator) to remove the service.")
+	} else {
+		fmt.Fprintf(out, "LaunchAgent: %s\n", plan.LaunchAgent.PlistPath)
+	}
 	fmt.Fprintf(out, "Socket:      %s\n", plan.LaunchAgent.SocketPath)
 	fmt.Fprintf(out, "Wrappers:    %s\n", plan.WrapperDir)
 	fmt.Fprintln(out)
@@ -121,4 +126,11 @@ func PrintUninstallPlan(out io.Writer, plan UninstallPlan) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", restore.Kind, restore.ConfigPath, action)
 	}
 	_ = tw.Flush()
+}
+
+func uninstallDaemonPrompt() string {
+	if currentGOOS == "windows" {
+		return "Step 1/3: Stop and remove Windows Service (requires Administrator)?"
+	}
+	return "Step 1/3: Stop and remove LaunchAgent?"
 }

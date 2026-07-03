@@ -10,6 +10,7 @@ permissions:
 
 env:
   HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+  SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
 
 jobs:
   release:
@@ -99,3 +100,59 @@ jobs:
         if: ${{ env.HOMEBREW_TAP_TOKEN == '' }}
         run: |
           echo "HOMEBREW_TAP_TOKEN is not configured; skipping Homebrew tap PR."
+
+      - name: Checkout Scoop bucket
+        if: ${{ env.SCOOP_BUCKET_TOKEN != '' }}
+        uses: actions/checkout@v5
+        with:
+          repository: sleticalboy/scoop-bucket
+          token: ${{ env.SCOOP_BUCKET_TOKEN }}
+          path: scoop-bucket
+
+      - name: Update Scoop manifest
+        if: ${{ env.SCOOP_BUCKET_TOKEN != '' }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p scoop-bucket/bucket
+          if [ ! -f scoop-bucket/bucket/lazy-mcp-wrapper.json ]; then
+            cp scripts/scoop/lazy-mcp-wrapper.json scoop-bucket/bucket/lazy-mcp-wrapper.json
+          fi
+          ./scripts/update-scoop-manifest.sh \
+            --manifest scoop-bucket/bucket/lazy-mcp-wrapper.json \
+            --tag "$RELEASE_TAG" \
+            --checksums dist/SHA256SUMS \
+            --repo "${{ github.repository }}"
+          ruby -rjson -e 'JSON.parse(File.read(ARGV.fetch(0)))' scoop-bucket/bucket/lazy-mcp-wrapper.json
+
+      - name: Create Scoop bucket pull request
+        if: ${{ env.SCOOP_BUCKET_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ env.SCOOP_BUCKET_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd scoop-bucket
+          if git diff --quiet -- bucket/lazy-mcp-wrapper.json; then
+            echo "Scoop manifest is already up to date."
+            exit 0
+          fi
+
+          branch="update-lazy-mcp-wrapper-${RELEASE_TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add bucket/lazy-mcp-wrapper.json
+          git commit -m "Update lazy-mcp-wrapper to ${RELEASE_TAG}"
+          git push --force-with-lease origin "$branch"
+          gh pr view "$branch" --repo sleticalboy/scoop-bucket >/dev/null 2>&1 || \
+            gh pr create \
+              --repo sleticalboy/scoop-bucket \
+              --base main \
+              --head "$branch" \
+              --title "Update lazy-mcp-wrapper to ${RELEASE_TAG}" \
+              --body "Update lazy-mcp-wrapper Scoop manifest for ${RELEASE_TAG}."
+
+      - name: Skip Scoop bucket update
+        if: ${{ env.SCOOP_BUCKET_TOKEN == '' }}
+        run: |
+          echo "SCOOP_BUCKET_TOKEN is not configured; skipping Scoop bucket PR."

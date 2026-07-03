@@ -214,7 +214,7 @@ func (p Plan) Apply(opts Options) error {
 
 func daemonSetupPrompt() string {
 	if currentGOOS == "windows" {
-		return "Step 2/3: Write daemon config?"
+		return "Step 2/3: Write daemon config and install Windows Service (requires Administrator)?"
 	}
 	return "Step 2/3: Install daemon as macOS LaunchAgent?"
 }

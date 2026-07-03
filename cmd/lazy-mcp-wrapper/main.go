@@ -187,6 +187,14 @@ func runDaemon(args []string) {
 		}
 	}
 
+	if handled, err := runWindowsServiceIfNeeded(*socketPath, server); handled {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Windows Service stopped: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals...)
 	defer stop()
 	fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper daemon listening on %s\n", *socketPath)
