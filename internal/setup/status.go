@@ -1,10 +1,16 @@
 package setup
 
+import (
+	"os"
+	"path/filepath"
+)
+
 type StatusReport struct {
 	WrapperDir    string
 	WrapperCount  int
 	DaemonRunning bool
 	DaemonSocket  string
+	PanicLog      string // non-empty if a panic.log exists
 	Clients       []ClientStatus
 }
 
@@ -29,6 +35,11 @@ func Status(opts Options) StatusReport {
 		WrapperCount:  len(wrappers),
 		DaemonRunning: daemonConnectable(socketPath),
 		DaemonSocket:  socketPath,
+	}
+	// 检查 panic.log
+	panicLog := filepath.Join(lazyMCPDir(opts.Home), "panic.log")
+	if _, err := os.Stat(panicLog); err == nil {
+		report.PanicLog = panicLog
 	}
 	for _, adapter := range allAdapters(opts.Home) {
 		status := ClientStatus{

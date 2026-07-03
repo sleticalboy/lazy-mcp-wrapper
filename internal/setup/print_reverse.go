@@ -38,6 +38,10 @@ func PrintStatusReport(out io.Writer, report StatusReport) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", client.Kind, client.ConfigPath, wrapped, total, notes)
 	}
 	_ = tw.Flush()
+	if report.PanicLog != "" {
+		fmt.Fprintf(out, "\nWARNING: daemon panic log found: %s\n", report.PanicLog)
+		fmt.Fprintf(out, "  Run `cat %s` to inspect, then delete it after review.\n", filepath.Base(report.PanicLog))
+	}
 }
 
 func PrintUpdatePlan(out io.Writer, plan UpdatePlan) {

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -475,6 +476,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			s.writePanic(fmt.Sprintf("handleConn panic: %v\n%s", r, debug.Stack()))
+		}
+	}()
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadBytes('\n')
@@ -712,6 +718,22 @@ func (s *Server) setLastError(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastError = err.Error()
+}
+
+// writePanic writes a panic report to stderr and, if a daemon config path is
+// known, to a panic.log file next to the daemon config for later inspection.
+func (s *Server) writePanic(msg string) {
+	fmt.Fprintf(os.Stderr, "\n[lazy-mcp-wrapper] PANIC: %s\n", msg)
+	if s.daemonConfigPath == "" {
+		return
+	}
+	panicFile := filepath.Join(filepath.Dir(s.daemonConfigPath), "panic.log")
+	f, err := os.OpenFile(panicFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "=== %s ===\n%s\n", time.Now().Format(time.RFC3339), msg)
 }
 
 func writeBindOK(w io.Writer) error {
