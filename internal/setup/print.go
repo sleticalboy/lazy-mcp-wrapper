@@ -23,11 +23,16 @@ func PrintPlan(out io.Writer, plan Plan) {
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Daemon config: %s\n", plan.DaemonConfig.ConfigPath)
 	fmt.Fprintf(out, "Socket:        %s\n", plan.DaemonConfig.SocketPath)
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
 		fmt.Fprintln(out, "Windows Service: lazy-mcp-wrapper")
 		fmt.Fprintln(out, "note: Run setup from an elevated terminal (Administrator) to install the service.")
-	} else {
+	case "darwin":
 		fmt.Fprintf(out, "LaunchAgent:   %s\n", plan.LaunchAgent.PlistPath)
+	case "linux":
+		fmt.Fprintf(out, "systemd unit:  %s\n", plan.LaunchAgent.PlistPath)
+	default:
+		fmt.Fprintf(out, "Auto-start:    unsupported on %s\n", currentGOOS)
 	}
 	fmt.Fprintln(out)
 	if len(plan.Blockers) > 0 {

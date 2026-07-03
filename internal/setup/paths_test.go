@@ -53,6 +53,30 @@ func TestLogDirByPlatform(t *testing.T) {
 	}
 }
 
+func TestLaunchAgentPathByPlatform(t *testing.T) {
+	home := t.TempDir()
+
+	withGOOS(t, "windows")
+	if got := launchAgentPath(home); got != "" {
+		t.Fatalf("windows launchAgentPath() = %s", got)
+	}
+
+	withGOOS(t, "darwin")
+	if got := launchAgentPath(home); got != filepath.Join(home, "Library", "LaunchAgents", defaultLabel+".plist") {
+		t.Fatalf("darwin launchAgentPath() = %s", got)
+	}
+
+	withGOOS(t, "linux")
+	if got := launchAgentPath(home); got != filepath.Join(home, ".config", "systemd", "user", defaultLabel+".service") {
+		t.Fatalf("linux launchAgentPath() = %s", got)
+	}
+
+	withGOOS(t, "freebsd")
+	if got := launchAgentPath(home); got != "" {
+		t.Fatalf("other launchAgentPath() = %s", got)
+	}
+}
+
 func TestClaudeDesktopConfigPathByPlatform(t *testing.T) {
 	home := t.TempDir()
 	appData := filepath.Join(home, "AppData", "Roaming")

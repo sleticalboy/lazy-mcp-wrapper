@@ -106,11 +106,16 @@ func Uninstall(opts Options) error {
 }
 
 func PrintUninstallPlan(out io.Writer, plan UninstallPlan) {
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
 		fmt.Fprintln(out, "Windows Service: lazy-mcp-wrapper")
 		fmt.Fprintln(out, "note: Run setup uninstall from an elevated terminal (Administrator) to remove the service.")
-	} else {
+	case "darwin":
 		fmt.Fprintf(out, "LaunchAgent: %s\n", plan.LaunchAgent.PlistPath)
+	case "linux":
+		fmt.Fprintf(out, "systemd unit: %s\n", plan.LaunchAgent.PlistPath)
+	default:
+		fmt.Fprintf(out, "Auto-start:  unsupported on %s\n", currentGOOS)
 	}
 	fmt.Fprintf(out, "Socket:      %s\n", plan.LaunchAgent.SocketPath)
 	fmt.Fprintf(out, "Wrappers:    %s\n", plan.WrapperDir)
@@ -129,8 +134,14 @@ func PrintUninstallPlan(out io.Writer, plan UninstallPlan) {
 }
 
 func uninstallDaemonPrompt() string {
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
 		return "Step 1/3: Stop and remove Windows Service (requires Administrator)?"
+	case "darwin":
+		return "Step 1/3: Stop and remove LaunchAgent?"
+	case "linux":
+		return "Step 1/3: Stop and remove systemd user service?"
+	default:
+		return "Step 1/3: Remove daemon auto-start files?"
 	}
-	return "Step 1/3: Stop and remove LaunchAgent?"
 }

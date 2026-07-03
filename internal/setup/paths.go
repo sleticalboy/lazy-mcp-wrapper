@@ -41,8 +41,14 @@ func logDir(home string) string {
 }
 
 func launchAgentPath(home string) string {
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
+		return ""
+	case "darwin":
+		return filepath.Join(home, "Library", "LaunchAgents", defaultLabel+".plist")
+	case "linux":
+		return filepath.Join(home, ".config", "systemd", "user", defaultLabel+".service")
+	default:
 		return ""
 	}
-	return filepath.Join(home, "Library", "LaunchAgents", defaultLabel+".plist")
 }

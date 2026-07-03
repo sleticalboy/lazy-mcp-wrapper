@@ -7,10 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
 type execFunc func(name string, args ...string) error
+
+const serviceDescription = "Lazy-loads MCP servers on demand and proxies AI client connections"
 
 func buildPlistXML(plan LaunchAgentPlan) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -44,9 +47,41 @@ func buildPlistXML(plan LaunchAgentPlan) string {
 `, xmlEscape(plan.Label), xmlEscape(plan.BinaryPath), xmlEscape(plan.DaemonConfig), xmlEscape(plan.PATH), xmlEscape(plan.LogDir), xmlEscape(plan.LogDir))
 }
 
+func buildSystemdUnit(plan LaunchAgentPlan) string {
+	return fmt.Sprintf(`[Unit]
+Description=%s
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%s daemon --daemon-config %s
+Environment=PATH=%s
+Restart=on-failure
+StandardOutput=append:%s/daemon.out.log
+StandardError=append:%s/daemon.err.log
+
+[Install]
+WantedBy=default.target
+`, serviceDescription, systemdQuoteArg(plan.BinaryPath), systemdQuoteArg(plan.DaemonConfig), systemdQuoteArg(plan.PATH), plan.LogDir, plan.LogDir)
+}
+
 func installLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
 		return installWindowsService(plan)
+	case "darwin":
+		return installDarwinLaunchAgent(plan, execer)
+	case "linux":
+		return installSystemdService(plan, execer)
+	default:
+		fmt.Fprintf(os.Stderr, "note: daemon auto-start is not supported on %s; start manually with: lazy-mcp-wrapper daemon --daemon-config %s\n", currentGOOS, plan.DaemonConfig)
+		return nil
+	}
+}
+
+func installDarwinLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
+	if execer == nil {
+		execer = realExec
 	}
 	if err := os.MkdirAll(filepath.Dir(plan.PlistPath), 0755); err != nil {
 		return err
@@ -79,9 +114,19 @@ func installLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 }
 
 func uninstallLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
 		return uninstallWindowsService(plan)
+	case "darwin":
+		return uninstallDarwinLaunchAgent(plan, execer)
+	case "linux":
+		return uninstallSystemdService(plan, execer)
+	default:
+		return nil
 	}
+}
+
+func uninstallDarwinLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 	if execer == nil {
 		execer = realExec
 	}
@@ -91,6 +136,54 @@ func uninstallLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 		return err
 	}
 	if err := os.Remove(plan.PlistPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func installSystemdService(plan LaunchAgentPlan, execer execFunc) error {
+	if execer == nil {
+		execer = realExec
+	}
+	if err := os.MkdirAll(filepath.Dir(plan.PlistPath), 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(plan.SocketPath), 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(plan.LogDir, 0755); err != nil {
+		return err
+	}
+	if err := uninstallSystemdService(plan, execer); err != nil {
+		return err
+	}
+	if err := os.WriteFile(plan.PlistPath, plan.Content, 0644); err != nil {
+		return err
+	}
+	_ = execer("systemctl", "--user", "daemon-reload")
+	if err := execer("systemctl", "--user", "enable", plan.Label); err != nil {
+		return err
+	}
+	if err := execer("systemctl", "--user", "start", plan.Label); err != nil {
+		return err
+	}
+	if plan.SocketPollAttempts <= 0 {
+		return nil
+	}
+	return pollSocket(plan.SocketPath, plan.SocketPollAttempts, 100*time.Millisecond)
+}
+
+func uninstallSystemdService(plan LaunchAgentPlan, execer execFunc) error {
+	if execer == nil {
+		execer = realExec
+	}
+	_ = execer("systemctl", "--user", "stop", plan.Label)
+	_ = execer("systemctl", "--user", "disable", plan.Label)
+	if err := os.Remove(plan.PlistPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	_ = execer("systemctl", "--user", "daemon-reload")
+	if err := os.Remove(plan.SocketPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
@@ -117,4 +210,11 @@ func pollSocket(path string, attempts int, delay time.Duration) error {
 
 func xmlEscape(value string) string {
 	return html.EscapeString(value)
+}
+
+func systemdQuoteArg(value string) string {
+	if value == "" {
+		return `""`
+	}
+	return strconv.Quote(value)
 }

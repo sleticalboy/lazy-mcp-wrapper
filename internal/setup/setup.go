@@ -213,10 +213,16 @@ func (p Plan) Apply(opts Options) error {
 }
 
 func daemonSetupPrompt() string {
-	if currentGOOS == "windows" {
+	switch currentGOOS {
+	case "windows":
 		return "Step 2/3: Write daemon config and install Windows Service (requires Administrator)?"
+	case "darwin":
+		return "Step 2/3: Install daemon as macOS LaunchAgent?"
+	case "linux":
+		return "Step 2/3: Install daemon as systemd user service?"
+	default:
+		return "Step 2/3: Write daemon config?"
 	}
-	return "Step 2/3: Install daemon as macOS LaunchAgent?"
 }
 
 func (o Options) execFunc() execFunc {
@@ -443,7 +449,12 @@ func defaultLaunchAgentPlan(opts Options) LaunchAgentPlan {
 		LogDir:             logDir,
 		PATH:               pathValue,
 	}
-	plan.Content = []byte(buildPlistXML(plan))
+	switch currentGOOS {
+	case "darwin":
+		plan.Content = []byte(buildPlistXML(plan))
+	case "linux":
+		plan.Content = []byte(buildSystemdUnit(plan))
+	}
 	return plan
 }
 
