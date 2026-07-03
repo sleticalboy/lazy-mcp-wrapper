@@ -39,5 +39,5 @@
 **目标**：覆盖 Windows 开发者，扩大用户群。详见 [plan-windows.md](plan-windows.md)。
 
 - [x] **优先级一：构建 + 核心运行**：条件编译修复 `syscall.SIGTERM` 和进程信号问题，Makefile + GitHub Actions 加 `windows/amd64` 构建，Release 上传 `.exe` + `.zip`
-- [ ] **优先级二：路径跨平台**：用 `os.UserConfigDir()`/`os.UserCacheDir()` 替换硬编码 macOS 路径，AI client 配置路径按平台适配，setup 命令在 Windows 可用
+- [x] **优先级二：路径跨平台**：新增 `paths.go` 封装跨平台路径，AI client 配置路径按平台适配，Windows 下跳过 LaunchAgent 并提示手动启动，setup 命令在 Windows 可用
 - [ ] **优先级三：Windows 系统服务**：`setup` 一键安装 daemon 为 Windows Service，Scoop/winget 分发渠道
