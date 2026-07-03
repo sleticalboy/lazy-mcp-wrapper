@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var mcpSectionRE = regexp.MustCompile(`^\s*\[mcp_servers\.((?:"[^"]+"|[A-Za-z0-9_-]+))(?:\.env)?\]\s*$`)
+var mcpSectionRE = regexp.MustCompile(`^\s*\[mcp_servers\.((?:"[^"]+"|[A-Za-z0-9_-]+))(?:\.(env|headers))?\]\s*$`)
 
 func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 	lines := strings.Split(string(data), "\n")
@@ -17,7 +17,7 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 	serversByName := map[string]*RawServer{}
 	order := []string{}
 	var current *RawServer
-	inEnv := false
+	subsection := ""
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -29,15 +29,18 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 				serversByName[name] = current
 				order = append(order, name)
 			}
-			inEnv = strings.HasSuffix(trimmed, ".env]")
-			if inEnv && current.Env == nil {
+			subsection = match[2]
+			if subsection == "env" && current.Env == nil {
 				current.Env = map[string]string{}
+			}
+			if subsection == "headers" && current.Headers == nil {
+				current.Headers = map[string]string{}
 			}
 			continue
 		}
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			current = nil
-			inEnv = false
+			subsection = ""
 			continue
 		}
 		if current == nil || trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -49,11 +52,18 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 		}
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(stripComment(value))
-		if inEnv {
+		switch subsection {
+		case "env":
 			if current.Env == nil {
 				current.Env = map[string]string{}
 			}
 			current.Env[key] = parseTOMLString(value)
+			continue
+		case "headers":
+			if current.Headers == nil {
+				current.Headers = map[string]string{}
+			}
+			current.Headers[key] = parseTOMLString(value)
 			continue
 		}
 		switch key {
@@ -61,6 +71,8 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 			current.Type = parseTOMLString(value)
 		case "command":
 			current.Command = parseTOMLString(value)
+		case "url":
+			current.URL = parseTOMLString(value)
 		case "args":
 			args, err := parseTOMLStringArray(value)
 			if err != nil {
@@ -117,8 +129,12 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 		}
 		lines = append(lines, fmt.Sprintf("[mcp_servers.%s]", quoteTableName(server.Name)))
 		lines = append(lines, fmt.Sprintf("type = %q", defaultType(server.Type)))
-		lines = append(lines, fmt.Sprintf("command = %q", server.Command))
-		lines = append(lines, "args = "+formatStringArray(server.Args))
+		if server.URL != "" {
+			lines = append(lines, fmt.Sprintf("url = %q", server.URL))
+		} else {
+			lines = append(lines, fmt.Sprintf("command = %q", server.Command))
+			lines = append(lines, "args = "+formatStringArray(server.Args))
+		}
 		if len(server.Env) > 0 {
 			lines = append(lines, fmt.Sprintf("[mcp_servers.%s.env]", quoteTableName(server.Name)))
 			keys := make([]string, 0, len(server.Env))
@@ -128,6 +144,17 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 			sort.Strings(keys)
 			for _, key := range keys {
 				lines = append(lines, fmt.Sprintf("%s = %q", key, server.Env[key]))
+			}
+		}
+		if len(server.Headers) > 0 {
+			lines = append(lines, fmt.Sprintf("[mcp_servers.%s.headers]", quoteTableName(server.Name)))
+			keys := make([]string, 0, len(server.Headers))
+			for key := range server.Headers {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				lines = append(lines, fmt.Sprintf("%s = %q", key, server.Headers[key]))
 			}
 		}
 	}

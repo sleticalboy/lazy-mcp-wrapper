@@ -3,7 +3,9 @@ package setup
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,6 +21,7 @@ const (
 	socketRel    = ".lazy-mcp-wrapper/lazy-mcpd.sock"
 	daemonRel    = ".lazy-mcp-wrapper/config.json"
 	wrappersRel  = ".lazy-mcp-wrapper/wrappers"
+	httpPortBase = 54300
 )
 
 type Options struct {
@@ -107,13 +110,22 @@ func NewPlan(opts Options) (Plan, error) {
 	sort.Strings(names)
 
 	wrapperDir := filepath.Join(opts.Home, wrappersRel)
+	usedPorts := existingLocalPorts(existingDaemonConfigPaths(filepath.Join(opts.Home, daemonRel)))
 	for _, name := range names {
 		server := wrappable[name]
 		configPath := filepath.Join(wrapperDir, safeName(name)+".json")
+		content := buildWrapperConfig(opts.Home, server)
+		if server.URL != "" {
+			port, err := allocateLocalPort(httpPortBase, usedPorts)
+			if err != nil {
+				plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %v", server.Name, err))
+			}
+			content.LocalPort = port
+		}
 		plan.WrapperConfigs = append(plan.WrapperConfigs, WrapperConfigPlan{
 			Server:     server,
 			ConfigPath: configPath,
-			Content:    buildWrapperConfig(opts.Home, server),
+			Content:    content,
 		})
 	}
 
@@ -139,7 +151,7 @@ func NewPlan(opts Options) (Plan, error) {
 		if err != nil {
 			continue
 		}
-		next := replaceWithWrapperRefs(servers, opts.BinaryPath, socketPath)
+		next := replaceWithWrapperRefs(servers, opts.BinaryPath, socketPath, localPortsByName(plan.WrapperConfigs))
 		newContent, err := renderAdapterContent(adapter, next)
 		if err != nil {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s render: %v", adapter.Kind(), err))
@@ -227,12 +239,9 @@ func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 	if isStateful(server.Name, server.Command, server.Args) {
 		sharing = "session"
 	}
-	return wrapper.Config{
+	cfg := wrapper.Config{
 		Name:           server.Name,
 		Sharing:        sharing,
-		Command:        server.Command,
-		Args:           server.Args,
-		Env:            server.Env,
 		RealProtocol:   "2024-11-05",
 		RealFraming:    "jsonl",
 		IdleTimeout:    wrapper.Duration{Duration: 5 * time.Minute},
@@ -240,6 +249,18 @@ func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 		CallTimeout:    wrapper.Duration{Duration: 180 * time.Second},
 		LogFile:        filepath.Join(os.TempDir(), "lazy-mcp-wrapper-"+safeName(server.Name)+".log"),
 	}
+	if server.URL != "" {
+		cfg.URL = server.URL
+		cfg.Protocol = server.Type
+		cfg.Headers = server.Headers
+		cfg.RealProtocol = ""
+		cfg.RealFraming = ""
+		return cfg
+	}
+	cfg.Command = server.Command
+	cfg.Args = server.Args
+	cfg.Env = server.Env
+	return cfg
 }
 
 func isStateful(name, command string, args []string) bool {
@@ -276,21 +297,76 @@ func mergeConfigPaths(existing, next []string) []string {
 	return out
 }
 
-func replaceWithWrapperRefs(servers []RawServer, binaryPath, socketPath string) []RawServer {
+func replaceWithWrapperRefs(servers []RawServer, binaryPath, socketPath string, localPorts map[string]int) []RawServer {
 	out := make([]RawServer, 0, len(servers))
 	for _, server := range servers {
 		next := server
 		if server.IsWrappable {
 			next.Name = canonicalName(server.Name)
-			next.Type = "stdio"
-			next.Command = binaryPath
-			next.Args = []string{"client", "--socket", socketPath, "--name", next.Name}
+			if server.URL != "" {
+				next.Type = defaultType(server.Type)
+				next.URL = localHTTPAddr(localPorts[strings.ToLower(next.Name)])
+				next.Command = ""
+				next.Args = nil
+				next.Env = nil
+				next.Headers = nil
+			} else {
+				next.Type = "stdio"
+				next.Command = binaryPath
+				next.Args = []string{"client", "--socket", socketPath, "--name", next.Name}
+				next.Env = nil
+			}
+			next.Raw = nil
 			next.Env = nil
 			next.IsWrappable = false
 		}
 		out = append(out, next)
 	}
 	return out
+}
+
+func allocateLocalPort(start int, used map[int]bool) (int, error) {
+	for port := start; port < start+200; port++ {
+		if used[port] {
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		used[port] = true
+		return port, nil
+	}
+	return 0, errors.New("no available port in range")
+}
+
+func existingLocalPorts(configPaths []string) map[int]bool {
+	used := map[int]bool{}
+	for _, path := range configPaths {
+		cfg, err := wrapper.LoadConfig(path)
+		if err != nil {
+			continue
+		}
+		if cfg.LocalPort > 0 {
+			used[cfg.LocalPort] = true
+		}
+	}
+	return used
+}
+
+func localPortsByName(configs []WrapperConfigPlan) map[string]int {
+	ports := map[string]int{}
+	for _, cfg := range configs {
+		if cfg.Content.LocalPort > 0 {
+			ports[strings.ToLower(canonicalName(cfg.Content.Name))] = cfg.Content.LocalPort
+		}
+	}
+	return ports
+}
+
+func localHTTPAddr(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
 func writeWrapperConfigs(configs []WrapperConfigPlan) error {

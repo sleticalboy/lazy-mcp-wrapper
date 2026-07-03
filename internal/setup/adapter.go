@@ -9,6 +9,7 @@ type RawServer struct {
 	Args        []string          `json:"args"`
 	Env         map[string]string `json:"env,omitempty"`
 	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
 	Raw         json.RawMessage   `json:"-"`
 	IsWrappable bool              `json:"is_wrappable"`
 }

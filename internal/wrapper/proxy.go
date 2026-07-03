@@ -26,11 +26,23 @@ type Proxy struct {
 	cfg            Config
 	log            *log.Logger
 	opts           ProxyOptions
-	client         *realClient
+	client         realBackend
 	clientProtocol string
 	clientInfo     map[string]any
 	clientCaps     map[string]any
 	mu             sync.Mutex
+}
+
+type realBackend interface {
+	call(ctx context.Context, method string, params json.RawMessage) (jsonrpc.Message, func(), error)
+	sendNotification(msg jsonrpc.Message) error
+	subscribe() chan jsonrpc.Message
+	unsubscribe(ch chan jsonrpc.Message)
+	alive() bool
+	touch()
+	close() error
+	pid() int
+	lastUsedAt() time.Time
 }
 
 type ProxyOptions struct {
@@ -62,9 +74,9 @@ func (p *Proxy) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 	notifDone := make(chan struct{})
 	go p.notifForwarder(writer, notifUpdates, notifDone)
 
-	var currentClient *realClient
+	var currentClient realBackend
 	var currentSub chan jsonrpc.Message
-	syncSubscription := func(client *realClient) {
+	syncSubscription := func(client realBackend) {
 		if client == nil || client == currentClient {
 			return
 		}
@@ -194,7 +206,7 @@ func (p *Proxy) notifForwarder(writer *lockedWriter, updates <-chan chan jsonrpc
 	}
 }
 
-func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient), afterWrite *func()) jsonrpc.Message {
+func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message, onRealClient func(realBackend), afterWrite *func()) jsonrpc.Message {
 	switch msg.Method {
 	case "initialize":
 		p.captureInitialize(msg.Params)
@@ -223,7 +235,7 @@ func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message, onRealCl
 	}
 }
 
-func (p *Proxy) toolsList(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient), afterWrite *func()) jsonrpc.Message {
+func (p *Proxy) toolsList(ctx context.Context, msg jsonrpc.Message, onRealClient func(realBackend), afterWrite *func()) jsonrpc.Message {
 	if cached, ok := p.cfg.readCachedToolsList(); ok {
 		cached.ID = msg.ID
 		p.log.Printf("tools/list cache hit name=%s", p.cfg.Name)
@@ -266,7 +278,7 @@ func (p *Proxy) protocolVersion() string {
 	return "2024-11-05"
 }
 
-func (p *Proxy) handleNotification(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient)) error {
+func (p *Proxy) handleNotification(ctx context.Context, msg jsonrpc.Message, onRealClient func(realBackend)) error {
 	switch msg.Method {
 	case "notifications/initialized", "notifications/cancelled":
 		return nil
@@ -280,7 +292,7 @@ func (p *Proxy) handleNotification(ctx context.Context, msg jsonrpc.Message, onR
 	}
 }
 
-func (p *Proxy) forward(ctx context.Context, msg jsonrpc.Message, onRealClient func(*realClient), afterWrite *func()) jsonrpc.Message {
+func (p *Proxy) forward(ctx context.Context, msg jsonrpc.Message, onRealClient func(realBackend), afterWrite *func()) jsonrpc.Message {
 	client, err := p.ensureReal(ctx)
 	if err != nil {
 		return jsonrpc.ErrorResponse(msg.ID, errInternal, err.Error())
@@ -302,7 +314,14 @@ func (p *Proxy) forward(ctx context.Context, msg jsonrpc.Message, onRealClient f
 	return resp
 }
 
-func (p *Proxy) ensureReal(ctx context.Context) (*realClient, error) {
+func (p *Proxy) ensureReal(ctx context.Context) (realBackend, error) {
+	if p.cfg.URL != "" {
+		return p.ensureHTTPReal(ctx)
+	}
+	return p.ensureStdioReal(ctx)
+}
+
+func (p *Proxy) ensureStdioReal(ctx context.Context) (realBackend, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -327,6 +346,38 @@ func (p *Proxy) ensureReal(ctx context.Context) (*realClient, error) {
 		init.ProtocolVersion = "2024-11-05"
 	}
 	client, err := startReal(ctx, p.cfg, p.log, init)
+	if err != nil {
+		return nil, err
+	}
+	p.client = client
+	return client, nil
+}
+
+func (p *Proxy) ensureHTTPReal(ctx context.Context) (realBackend, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.client != nil && p.client.alive() {
+		p.client.touch()
+		return p.client, nil
+	}
+	if p.client != nil {
+		_ = p.client.close()
+		p.client = nil
+	}
+
+	init := initRequest{
+		ProtocolVersion: p.clientProtocol,
+		ClientInfo:      p.clientInfo,
+		Capabilities:    p.clientCaps,
+	}
+	if p.cfg.RealProtocol != "" {
+		init.ProtocolVersion = p.cfg.RealProtocol
+	}
+	if init.ProtocolVersion == "" {
+		init.ProtocolVersion = "2024-11-05"
+	}
+	client, err := startHTTPReal(ctx, p.cfg, p.log, init)
 	if err != nil {
 		return nil, err
 	}

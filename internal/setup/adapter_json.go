@@ -2,6 +2,7 @@ package setup
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,7 @@ type jsonServer struct {
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 func newJSONAdapter(kind, path string) ClientAdapter {
@@ -69,6 +71,7 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 			Args:    server.Args,
 			Env:     server.Env,
 			URL:     server.URL,
+			Headers: server.Headers,
 			Raw:     cfg.MCPServers[name],
 		}
 		raw.IsWrappable = isWrappable(raw)
@@ -115,6 +118,7 @@ func renderJSONConfig(path string, servers []RawServer) ([]byte, error) {
 			Args:    server.Args,
 			Env:     server.Env,
 			URL:     server.URL,
+			Headers: server.Headers,
 		})
 		if err != nil {
 			return nil, err
@@ -157,19 +161,35 @@ func isWrappable(server RawServer) bool {
 	if strings.EqualFold(server.Name, "node_repl") || strings.Contains(strings.ToLower(filepath.Base(server.Command)), "node_repl") {
 		return false
 	}
-	if defaultType(server.Type) != "stdio" {
-		return false
-	}
-	if server.Command == "" {
-		return false
-	}
-	if filepath.Base(server.Command) == "lazy-mcp-wrapper" {
-		return false
-	}
-	for _, arg := range server.Args {
-		if arg == "client" || arg == "--config" {
+	switch defaultType(server.Type) {
+	case "stdio":
+		if server.Command == "" {
 			return false
 		}
+		if filepath.Base(server.Command) == "lazy-mcp-wrapper" {
+			return false
+		}
+		for _, arg := range server.Args {
+			if arg == "client" || arg == "--config" {
+				return false
+			}
+		}
+		return true
+	case "sse", "http", "streamable-http":
+		return server.URL != "" && !isHTTPWrapperRef(server)
+	default:
+		return false
 	}
-	return true
+}
+
+func isHTTPWrapperRef(server RawServer) bool {
+	rawURL := strings.TrimSpace(server.URL)
+	if strings.HasPrefix(rawURL, "http://127.0.0.1:") {
+		return true
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http" && parsed.Hostname() == "127.0.0.1"
 }

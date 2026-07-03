@@ -16,6 +16,10 @@ type Config struct {
 	Args           []string          `json:"args"`
 	Env            map[string]string `json:"env"`
 	CWD            string            `json:"cwd"`
+	URL            string            `json:"url,omitempty"`
+	Protocol       string            `json:"protocol,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	LocalPort      int               `json:"local_port,omitempty"`
 	RealProtocol   string            `json:"real_protocol_version"`
 	RealFraming    string            `json:"real_framing"`
 	CacheDir       string            `json:"cache_dir"`
@@ -60,8 +64,18 @@ func LoadConfig(path string) (Config, error) {
 	if cfg.Name == "" {
 		return Config{}, fmt.Errorf("config name is required")
 	}
-	if cfg.Command == "" {
-		return Config{}, fmt.Errorf("config command is required")
+	if cfg.Command == "" && cfg.URL == "" {
+		return Config{}, fmt.Errorf("config command or url is required")
+	}
+	if cfg.Command != "" && cfg.URL != "" {
+		return Config{}, fmt.Errorf("config command and url are mutually exclusive")
+	}
+	if cfg.URL != "" {
+		switch cfg.HTTPProtocol() {
+		case "sse", "streamable-http":
+		default:
+			return Config{}, fmt.Errorf("config protocol must be sse, http, or streamable-http")
+		}
 	}
 	if cfg.Sharing == "" {
 		cfg.Sharing = "shared"
@@ -94,10 +108,25 @@ func (c *Config) expandEnv() {
 		c.Env[key] = os.ExpandEnv(value)
 	}
 	c.CWD = os.ExpandEnv(c.CWD)
+	c.URL = os.ExpandEnv(c.URL)
 	c.CacheDir = os.ExpandEnv(c.CacheDir)
 	c.LogFile = os.ExpandEnv(c.LogFile)
+	for key, value := range c.Headers {
+		c.Headers[key] = os.ExpandEnv(value)
+	}
 }
 
 func (c Config) Framing() (jsonrpc.Framing, error) {
 	return jsonrpc.NormalizeFraming(c.RealFraming)
+}
+
+func (c Config) HTTPProtocol() string {
+	switch c.Protocol {
+	case "":
+		return "sse"
+	case "http":
+		return "streamable-http"
+	default:
+		return c.Protocol
+	}
 }

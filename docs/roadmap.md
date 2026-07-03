@@ -27,7 +27,7 @@
 
 **目标**：覆盖 stdio 之外的 MCP server，扩大工具适用范围。
 
-- [ ] **1. HTTP/SSE lazy proxy**：本地监听一个端口，收到请求时才启动真实 HTTP/SSE server（或按需转发），空闲超时后停止
-- [ ] **2. setup 支持 HTTP/SSE server 检测**：`RawServer.Type` 已预留，打开 `IsWrappable` 开关，生成对应 wrapper config
-- [ ] **3. daemon 支持 HTTP/SSE server 管理**：daemon 统一管理 stdio + http/sse server 的生命周期和状态展示
-- [ ] **4. 测试覆盖**：fake-mcp 支持 HTTP/SSE 模式，补充对应集成测试
+- [x] **1. HTTP/SSE lazy proxy（阶段一）**：`realHTTPClient` + `ProxyHTTPServer`，支持旧版 SSE 和 Streamable HTTP，`realBackend` 接口抽象 stdio/http 两条路径，Config 扩展 `url/protocol/headers` 字段
+- [ ] **2. setup 支持 HTTP/SSE server 检测（阶段二）**：打开 `isWrappable` 的 HTTP/SSE 开关，`buildWrapperConfig` 生成 HTTP 类型 config，`replaceWithWrapperRefs` 替换为本地 wrapper 地址
+- [ ] **3. daemon 支持 HTTP/SSE server 管理（阶段二）**：daemon 启动 `ProxyHTTPServer` 并管理其生命周期，状态展示包含 HTTP server 地址
+- [ ] **4. 端口分配**：setup 自动分配本地监听端口（从 54300 起递增检测可用性），写入 Config `local_port` 字段
