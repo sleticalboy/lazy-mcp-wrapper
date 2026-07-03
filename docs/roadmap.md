@@ -31,3 +31,13 @@
 - [x] **2. setup 支持 HTTP/SSE server 检测（阶段二）**：打开 `isWrappable` 的 HTTP/SSE 开关，`buildWrapperConfig` 生成 HTTP 类型 config，`replaceWithWrapperRefs` 替换为本地 wrapper 地址
 - [x] **3. daemon 支持 HTTP/SSE server 管理（阶段二）**：daemon 启动 `ProxyHTTPServer` 并管理其生命周期，状态展示包含 HTTP server 地址
 - [x] **4. 端口分配**：setup 自动分配本地监听端口（从 54300 起递增检测可用性），写入 Config `local_port` 字段
+
+---
+
+## 方向四：Windows 支持
+
+**目标**：覆盖 Windows 开发者，扩大用户群。详见 [plan-windows.md](plan-windows.md)。
+
+- [x] **优先级一：构建 + 核心运行**：条件编译修复 `syscall.SIGTERM` 和进程信号问题，Makefile + GitHub Actions 加 `windows/amd64` 构建，Release 上传 `.exe` + `.zip`
+- [ ] **优先级二：路径跨平台**：用 `os.UserConfigDir()`/`os.UserCacheDir()` 替换硬编码 macOS 路径，AI client 配置路径按平台适配，setup 命令在 Windows 可用
+- [ ] **优先级三：Windows 系统服务**：`setup` 一键安装 daemon 为 Windows Service，Scoop/winget 分发渠道
