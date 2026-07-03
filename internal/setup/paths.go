@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 var currentGOOS = runtime.GOOS
@@ -51,4 +52,69 @@ func launchAgentPath(home string) string {
 	default:
 		return ""
 	}
+}
+
+// enrichPATH 在系统 PATH 基础上追加常见工具链路径，确保 daemon 能找到
+// 通过 nvm/pyenv/mise/homebrew 等安装的工具。
+func enrichPATH(base string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return base
+	}
+	candidates := []string{
+		// Node（nvm）
+		filepath.Join(home, ".nvm", "versions", "node"),
+		// Python（pyenv）
+		filepath.Join(home, ".pyenv", "shims"),
+		filepath.Join(home, ".pyenv", "bin"),
+		// mise / asdf
+		filepath.Join(home, ".local", "share", "mise", "shims"),
+		filepath.Join(home, ".asdf", "shims"),
+		// Homebrew（Apple Silicon）
+		"/opt/homebrew/bin",
+		"/opt/homebrew/sbin",
+		// Homebrew（Intel）
+		"/usr/local/bin",
+		// Cargo
+		filepath.Join(home, ".cargo", "bin"),
+		// Go
+		filepath.Join(home, "go", "bin"),
+		// user local bin
+		filepath.Join(home, ".local", "bin"),
+	}
+
+	existing := make(map[string]bool)
+	for _, p := range filepath.SplitList(base) {
+		existing[p] = true
+	}
+
+	extra := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		// nvm 目录本身不可执行，展开一层找实际 bin 目录
+		if filepath.Base(c) == "node" {
+			entries, err := os.ReadDir(c)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				if e.IsDir() {
+					bin := filepath.Join(c, e.Name(), "bin")
+					if !existing[bin] {
+						extra = append(extra, bin)
+						existing[bin] = true
+					}
+				}
+			}
+			continue
+		}
+		if !existing[c] {
+			extra = append(extra, c)
+			existing[c] = true
+		}
+	}
+
+	if len(extra) == 0 {
+		return base
+	}
+	return base + string(os.PathListSeparator) + strings.Join(extra, string(os.PathListSeparator))
 }

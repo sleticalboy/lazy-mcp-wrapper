@@ -380,6 +380,21 @@ func runSetup(args []string) {
 	case "status":
 		setup.PrintStatusReport(os.Stdout, setup.Status(opts))
 		return
+	case "verify":
+		results := setup.Verify(opts)
+		ok := true
+		for _, r := range results {
+			if r.Err != nil {
+				fmt.Fprintf(os.Stdout, "  %-30s ERROR  %v\n", r.Name, r.Err)
+				ok = false
+			} else {
+				fmt.Fprintf(os.Stdout, "  %-30s OK     %d tools  (%s)\n", r.Name, r.ToolCount, r.Elapsed.Round(time.Millisecond))
+			}
+		}
+		if !ok {
+			os.Exit(1)
+		}
+		return
 	case "uninstall":
 		if err := setup.Uninstall(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup uninstall: %v\n", err)

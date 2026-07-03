@@ -438,7 +438,7 @@ func defaultLaunchAgentPlan(opts Options) LaunchAgentPlan {
 	socketPath := socketPath(opts.Home)
 	daemonConfigPath := daemonConfigPath(opts.Home)
 	logDir := logDir(opts.Home)
-	pathValue := os.Getenv("PATH")
+	pathValue := enrichPATH(os.Getenv("PATH"))
 	plan := LaunchAgentPlan{
 		Label:              defaultLabel,
 		PlistPath:          plistPath,
