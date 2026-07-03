@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -44,3 +47,54 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
             dist/SHA256SUMS
+
+      - name: Checkout Homebrew tap
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        uses: actions/checkout@v5
+        with:
+          repository: sleticalboy/homebrew-tap
+          token: ${{ env.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          ./scripts/update-homebrew-formula.sh \
+            --formula homebrew-tap/Formula/lazy-mcp-wrapper.rb \
+            --tag "$RELEASE_TAG" \
+            --checksums dist/SHA256SUMS
+          ruby -c homebrew-tap/Formula/lazy-mcp-wrapper.rb
+
+      - name: Create Homebrew tap pull request
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ env.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd homebrew-tap
+          if git diff --quiet -- Formula/lazy-mcp-wrapper.rb; then
+            echo "Formula is already up to date."
+            exit 0
+          fi
+
+          branch="update-lazy-mcp-wrapper-${RELEASE_TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add Formula/lazy-mcp-wrapper.rb
+          git commit -m "Update lazy-mcp-wrapper to ${RELEASE_TAG}"
+          git push --force-with-lease origin "$branch"
+          gh pr view "$branch" --repo sleticalboy/homebrew-tap >/dev/null 2>&1 || \
+            gh pr create \
+              --repo sleticalboy/homebrew-tap \
+              --base main \
+              --head "$branch" \
+              --title "Update lazy-mcp-wrapper to ${RELEASE_TAG}" \
+              --body "Update lazy-mcp-wrapper Homebrew formula for ${RELEASE_TAG}."
+
+      - name: Skip Homebrew tap update
+        if: ${{ env.HOMEBREW_TAP_TOKEN == '' }}
+        run: |
+          echo "HOMEBREW_TAP_TOKEN is not configured; skipping Homebrew tap PR."
