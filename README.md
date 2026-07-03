@@ -2,9 +2,34 @@
 
 中文文档: [README.zh-CN.md](./README.zh-CN.md)
 
-`lazy-mcp-wrapper` is a lightweight stdio MCP proxy. Codex starts this wrapper, and the wrapper starts the real MCP server only when a forwarded method is needed.
+`lazy-mcp-wrapper` is a lightweight MCP proxy for keeping local AI clients fast to start. Codex, Cursor, Claude Code, and Claude Desktop can start the wrapper immediately; the wrapper starts the real MCP server only when a tool call actually needs it.
 
-The intended use case is reducing idle memory usage for MCP servers such as Context7, Playwright, and MasterGo.
+## Install
+
+```bash
+brew tap sleticalboy/tap
+brew install lazy-mcp-wrapper
+lazy-mcp-wrapper setup
+```
+
+Check the result:
+
+```bash
+lazy-mcp-wrapper setup status
+```
+
+![setup status](./docs/setup-status.svg)
+
+## What It Does
+
+- Reduces idle memory usage from MCP servers such as Context7, Playwright, and MasterGo.
+- Keeps stdio MCP servers out of the client startup path until `tools/call`, `resources/*`, or `prompts/*` needs the real server.
+- Caches `tools/list` so clients can discover tools without repeatedly starting heavy MCP processes.
+- Shares stateless MCP servers through a local daemon across multiple Codex CLI sessions.
+- Preserves stateful MCP isolation with `sharing: "session"` for servers such as Playwright.
+- Provides `setup`, `setup status`, `setup update`, and `setup uninstall` for reversible client configuration.
+
+Current scope: stdio MCP servers. HTTP/SSE support is tracked in [docs/roadmap.md](./docs/roadmap.md).
 
 ## Build
 
@@ -13,7 +38,7 @@ make build
 make test
 ```
 
-## Install
+## Build From Source
 
 Install locally to `~/.local/bin/lazy-mcp-wrapper`:
 

@@ -1,6 +1,33 @@
 # lazy-mcp-wrapper 中文文档
 
-`lazy-mcp-wrapper` 是一个轻量级 stdio MCP 代理。它的目标是让 Codex 仍然能正常发现和调用 MCP 工具，但底层真实 MCP 服务只在真正需要时才启动，从而降低空闲内存占用。
+`lazy-mcp-wrapper` 是一个轻量级 MCP 代理，用来降低本机 AI 客户端的 MCP 常驻内存和启动成本。Codex、Cursor、Claude Code、Claude Desktop 可以先启动 wrapper；真实 MCP 服务只在工具调用真正需要时才启动。
+
+## 快速安装
+
+```bash
+brew tap sleticalboy/tap
+brew install lazy-mcp-wrapper
+lazy-mcp-wrapper setup
+```
+
+检查配置结果：
+
+```bash
+lazy-mcp-wrapper setup status
+```
+
+![setup status](./docs/setup-status.svg)
+
+## 它解决什么问题
+
+- 降低 Context7、Playwright、MasterGo 等 MCP 的空闲内存占用。
+- 避免 Codex 等客户端启动时直接拉起所有 stdio MCP。
+- 缓存 `tools/list`，让客户端发现工具时不必反复启动重型 MCP 进程。
+- 通过本地 daemon 让多个 Codex CLI 会话共享无状态 MCP。
+- 对 Playwright 这类有状态 MCP 使用 `sharing: "session"`，避免浏览器上下文互相污染。
+- 提供 `setup`、`setup status`、`setup update`、`setup uninstall`，配置可检查、可更新、可回滚。
+
+当前主要支持 stdio MCP。HTTP/SSE 支持在 [docs/roadmap.md](./docs/roadmap.md) 中跟踪。
 
 适合包装这类 MCP：
 

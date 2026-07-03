@@ -9,7 +9,7 @@
 - [x] **3. GitHub Actions Release 流程**：push tag 触发，三平台构建 → sha256 → 上传 GitHub Release assets
 - [x] **4. 新建 homebrew-tap 仓库**：`sleticalboy/homebrew-tap`，写 `lazy-mcp-wrapper.rb` Formula（url、sha256、install、test）
 - [x] **5. Formula 自动更新**：Release 后 Actions 自动给 homebrew-tap 提 PR 更新 sha256（需配置 `HOMEBREW_TAP_TOKEN`）
-- [ ] **6. README 打磨**：醒目的 Install 段落（三行 brew 命令）、"What it does" 说明、setup 截图/录屏
+- [x] **6. README 打磨**：醒目的 Install 段落（三行 brew 命令）、"What it does" 说明、setup 截图/录屏
 
 ---
 

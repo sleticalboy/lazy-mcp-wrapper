@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="330" viewBox="0 0 980 330" role="img" aria-labelledby="title desc">
+  <title id="title">lazy-mcp-wrapper setup status terminal output</title>
+  <desc id="desc">Terminal screenshot showing daemon status and wrapped MCP client counts.</desc>
+  <rect width="980" height="330" rx="10" fill="#101418"/>
+  <rect x="0" y="0" width="980" height="34" rx="10" fill="#20262d"/>
+  <circle cx="20" cy="17" r="6" fill="#ff5f57"/>
+  <circle cx="40" cy="17" r="6" fill="#ffbd2e"/>
+  <circle cx="60" cy="17" r="6" fill="#28c840"/>
+  <text x="84" y="22" fill="#b8c0cc" font-family="Menlo, Consolas, monospace" font-size="13">lazy-mcp-wrapper setup status</text>
+  <g font-family="Menlo, Consolas, monospace" font-size="15" fill="#dbe4ee">
+    <text x="24" y="64">$ lazy-mcp-wrapper setup status</text>
+    <text x="24" y="100">Daemon:   running  (/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock)</text>
+    <text x="24" y="126">Wrappers: 3        (/Users/you/.lazy-mcp-wrapper/wrappers)</text>
+    <text x="24" y="170">Client          Config                                    Wrapped  Total  Notes</text>
+    <text x="24" y="196">codex           ~/.codex/config.toml                      3        4      (1 not wrapped: node_repl)</text>
+    <text x="24" y="222">cursor          ~/.cursor/mcp.json                        2        3      (1 not wrapped: http/sse)</text>
+    <text x="24" y="248">claude-code     ~/.claude/settings.json                   1        1</text>
+    <text x="24" y="274">claude-desktop  ~/Library/Application Support/Claude/...  0        0</text>
+  </g>
+</svg>
