@@ -43,3 +43,28 @@ args = ["-y","@upstash/context7-mcp"]
 		t.Fatalf("updated config missing wrapper:\n%s", string(data))
 	}
 }
+
+func TestCodexAdapterTreatsURLOnlyServerAsStreamableHTTP(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	adapter := newCodexAdapter(home)
+	servers, err := adapter.ReadServers()
+	if err != nil {
+		t.Fatalf("ReadServers() error = %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("servers = %#v", servers)
+	}
+	if servers[0].Type != "" || !servers[0].IsWrappable {
+		t.Fatalf("URL-only server should be wrappable with implicit streamable-http: %#v", servers[0])
+	}
+}

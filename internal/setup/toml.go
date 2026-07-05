@@ -25,7 +25,7 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 			name := unquoteTableName(match[1])
 			current = serversByName[name]
 			if current == nil {
-				current = &RawServer{Name: name, Type: "stdio"}
+				current = &RawServer{Name: name}
 				serversByName[name] = current
 				order = append(order, name)
 			}

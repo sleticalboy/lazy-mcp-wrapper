@@ -66,7 +66,7 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 		}
 		raw := RawServer{
 			Name:    name,
-			Type:    defaultType(server.Type),
+			Type:    server.Type,
 			Command: server.Command,
 			Args:    server.Args,
 			Env:     server.Env,
@@ -157,11 +157,18 @@ func defaultType(value string) string {
 	return value
 }
 
+func effectiveType(server RawServer) string {
+	if server.Type == "" && server.URL != "" {
+		return "streamable-http"
+	}
+	return defaultType(server.Type)
+}
+
 func isWrappable(server RawServer) bool {
 	if strings.EqualFold(server.Name, "node_repl") || strings.Contains(strings.ToLower(filepath.Base(server.Command)), "node_repl") {
 		return false
 	}
-	switch defaultType(server.Type) {
+	switch effectiveType(server) {
 	case "stdio":
 		if server.Command == "" {
 			return false

@@ -1,6 +1,10 @@
 package setup
 
 import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +78,88 @@ func TestInstallLaunchAgentWritesPlist(t *testing.T) {
 	}
 	if len(calls) < 5 {
 		t.Fatalf("calls = %#v", calls)
+	}
+	if _, err := os.Stat(plan.PlistPath); err != nil {
+		t.Fatalf("plist not written: %v", err)
+	}
+}
+
+func TestInstallLaunchAgentReloadsConnectableDaemon(t *testing.T) {
+	withGOOS(t, "darwin")
+	home, err := os.MkdirTemp("/tmp", "lmw-agent-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	socketPath := filepath.Join(home, ".lazy-mcp-wrapper", "lazy-mcpd.sock")
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < 2; i++ {
+			conn, err := ln.Accept()
+			if err != nil {
+				done <- err
+				return
+			}
+			if i == 1 {
+				line, err := bufio.NewReader(conn).ReadBytes('\n')
+				if err != nil {
+					_ = conn.Close()
+					done <- err
+					return
+				}
+				var req map[string]any
+				if err := json.Unmarshal(line, &req); err != nil {
+					_ = conn.Close()
+					done <- err
+					return
+				}
+				if req["control"] != "reload" || req["graceful"] != true {
+					_ = conn.Close()
+					done <- fmt.Errorf("request = %#v", req)
+					return
+				}
+				if _, err := conn.Write([]byte(`{"ok":true}` + "\n")); err != nil {
+					_ = conn.Close()
+					done <- err
+					return
+				}
+			}
+			_ = conn.Close()
+		}
+		done <- nil
+	}()
+
+	plan := LaunchAgentPlan{
+		Label:        "com.test.lazy",
+		PlistPath:    filepath.Join(home, "Library", "LaunchAgents", "com.test.lazy.plist"),
+		SocketPath:   socketPath,
+		DaemonConfig: filepath.Join(home, ".lazy-mcp-wrapper", "config.json"),
+		BinaryPath:   "/bin/lazy",
+		LogDir:       filepath.Join(home, "Library", "Logs", "lazy"),
+		PATH:         "/bin",
+	}
+	plan.Content = []byte(buildPlistXML(plan))
+	var calls []string
+	execer := func(name string, args ...string) error {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	if err := installLaunchAgent(plan, execer); err != nil {
+		t.Fatalf("installLaunchAgent() error = %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("fake daemon error: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("launchctl should not be called for connectable daemon: %#v", calls)
 	}
 	if _, err := os.Stat(plan.PlistPath); err != nil {
 		t.Fatalf("plist not written: %v", err)

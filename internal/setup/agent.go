@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
 )
 
 type execFunc func(name string, args ...string) error
@@ -91,6 +93,19 @@ func installDarwinLaunchAgent(plan LaunchAgentPlan, execer execFunc) error {
 	}
 	if err := os.MkdirAll(plan.LogDir, 0755); err != nil {
 		return err
+	}
+	if daemonConnectable(plan.SocketPath) {
+		if err := os.WriteFile(plan.PlistPath, plan.Content, 0644); err != nil {
+			return err
+		}
+		resp, err := daemon.SendControl(plan.SocketPath, "reload", daemon.ControlOptions{Graceful: true})
+		if err != nil {
+			return fmt.Errorf("reload existing daemon: %w", err)
+		}
+		if !resp.OK {
+			return fmt.Errorf("reload existing daemon: %s", resp.Error)
+		}
+		return nil
 	}
 	if err := uninstallLaunchAgent(plan, execer); err != nil {
 		return err

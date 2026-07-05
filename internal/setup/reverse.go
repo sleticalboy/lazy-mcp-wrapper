@@ -18,7 +18,7 @@ type existingWrapperConfig struct {
 }
 
 func isWrapperRef(server RawServer, socketPath string) bool {
-	if defaultType(server.Type) != "stdio" {
+	if effectiveType(server) != "stdio" {
 		return false
 	}
 	if filepath.Base(server.Command) == "lazy-mcp-wrapper" {

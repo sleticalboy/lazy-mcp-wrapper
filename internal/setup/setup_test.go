@@ -53,6 +53,72 @@ args = ["@playwright/mcp@latest"]
 	}
 }
 
+func TestPlanWrapsURLOnlyMCPAsStreamableHTTP(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+		Now:        time.Date(2026, 7, 5, 9, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.Blockers) != 0 {
+		t.Fatalf("blockers = %#v", plan.Blockers)
+	}
+	if len(plan.WrapperConfigs) != 1 {
+		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
+	}
+	cfg := plan.WrapperConfigs[0].Content
+	if cfg.Name != "figma" || cfg.URL != "https://mcp.figma.com/mcp" || cfg.Protocol != "streamable-http" || cfg.LocalPort == 0 {
+		t.Fatalf("figma wrapper config = %#v", cfg)
+	}
+	if len(plan.ClientUpdates) != 1 {
+		t.Fatalf("client updates = %#v", plan.ClientUpdates)
+	}
+	content := string(plan.ClientUpdates[0].NewContent)
+	if !strings.Contains(content, `type = "streamable-http"`) || !strings.Contains(content, `url = "http://127.0.0.1:`) {
+		t.Fatalf("client update missing local streamable-http ref:\n%s", content)
+	}
+}
+
+func TestMergeConfigPathsByNamePrefersNewWrapperPath(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig := func(path, name string) string {
+		t.Helper()
+		data := []byte(`{
+  "name": "` + name + `",
+  "command": "npx",
+  "args": ["` + name + `"]
+}
+`)
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	context7 := writeConfig(filepath.Join(dir, "context7-old.json"), "context7")
+	mastergoOld := writeConfig(filepath.Join(dir, "mastergo-old.json"), "mastergo-magic-mcp")
+	mastergoNew := writeConfig(filepath.Join(dir, "mastergo-new.json"), "mastergo-magic-mcp")
+	figma := writeConfig(filepath.Join(dir, "figma.json"), "figma")
+
+	got := mergeConfigPathsByName([]string{context7, mastergoOld}, []string{mastergoNew, figma})
+	want := []string{context7, mastergoNew, figma}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("merged paths = %#v, want %#v", got, want)
+	}
+}
+
 func TestPlanApplyWritesAllFilesAndBackups(t *testing.T) {
 	home := t.TempDir()
 	codexPath := filepath.Join(home, ".codex", "config.toml")

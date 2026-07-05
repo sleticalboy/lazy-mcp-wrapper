@@ -287,3 +287,7 @@ make smoke-playwright-session
 The MasterGo smoke uses `configs.local/mastergo-magic-mcp.json` when present, because the committed example intentionally contains no real token. Its tool call allows a validation error result because MasterGo design tools require a real `fileId`/`layerId`; that still verifies the wrapper can initialize the real MCP and forward `tools/call`.
 
 If a real MCP server does not respond, check the configured `log_file`. A failure in `cmd/mcp-smoke` with no response from direct MCP startup usually means the upstream MCP command is not entering stdio server mode, not that the wrapper transport is broken.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

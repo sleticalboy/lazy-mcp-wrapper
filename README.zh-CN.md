@@ -478,3 +478,7 @@ cp /path/to/config.toml.bak ~/.codex/config.toml
 ```
 
 然后重启 Codex 或开启新会话。
+
+## 许可证
+
+MIT。详见 [LICENSE](./LICENSE)。
