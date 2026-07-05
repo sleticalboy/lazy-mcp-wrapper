@@ -75,6 +75,8 @@ type LaunchAgentPlan struct {
 func NewPlan(opts Options) (Plan, error) {
 	opts = normalizeOptions(opts)
 	var plan Plan
+	socketPath := socketPath(opts.Home)
+	skippedByName := map[string]bool{}
 
 	if opts.BinaryPath == "" {
 		plan.Blockers = append(plan.Blockers, "binary path is required")
@@ -90,12 +92,20 @@ func NewPlan(opts Options) (Plan, error) {
 		info := ClientInfo{Kind: adapter.Kind(), ConfigPath: adapter.ConfigPath(), Servers: servers}
 		plan.DetectedClients = append(plan.DetectedClients, info)
 		for _, server := range servers {
+			server.Name = canonicalName(server.Name)
+			if server.Name == "" {
+				continue
+			}
+			if isWrapperRef(server, socketPath) || isHTTPWrapperRef(server) {
+				continue
+			}
 			if server.IsWrappable {
-				server.Name = canonicalName(server.Name)
 				key := strings.ToLower(server.Name)
 				if _, exists := wrappable[key]; !exists {
 					wrappable[key] = server
 				}
+			} else {
+				skippedByName[strings.ToLower(server.Name)] = true
 			}
 		}
 	}
@@ -126,9 +136,8 @@ func NewPlan(opts Options) (Plan, error) {
 		})
 	}
 
-	socketPath := socketPath(opts.Home)
 	daemonConfigPath := daemonConfigPath(opts.Home)
-	mergedConfigPaths := mergeConfigPathsByName(existingDaemonConfigPaths(daemonConfigPath), configPaths(plan.WrapperConfigs))
+	mergedConfigPaths := mergeConfigPathsByName(existingDaemonConfigPaths(daemonConfigPath), configPaths(plan.WrapperConfigs), skippedByName)
 	if len(mergedConfigPaths) == 0 {
 		plan.Blockers = append(plan.Blockers, "no wrappable stdio MCP servers found")
 	}
@@ -318,7 +327,7 @@ func existingDaemonConfigPaths(path string) []string {
 	return cfg.ConfigPaths
 }
 
-func mergeConfigPathsByName(existing, next []string) []string {
+func mergeConfigPathsByName(existing, next []string, skipped map[string]bool) []string {
 	orderedNames := []string{}
 	pathsByName := map[string]string{}
 	seenPath := map[string]bool{}
@@ -338,6 +347,10 @@ func mergeConfigPathsByName(existing, next []string) []string {
 		}
 	}
 	for _, path := range existing {
+		name := configName(path)
+		if name != "" && skipped[name] {
+			continue
+		}
 		add(path, false)
 	}
 	for _, path := range next {
@@ -371,6 +384,7 @@ func replaceWithWrapperRefs(servers []RawServer, binaryPath, socketPath string, 
 			next.Name = canonicalName(server.Name)
 			if server.URL != "" {
 				next.Type = effectiveType(server)
+				next.Auth = ""
 				next.URL = localHTTPAddr(localPorts[strings.ToLower(next.Name)])
 				next.Command = ""
 				next.Args = nil

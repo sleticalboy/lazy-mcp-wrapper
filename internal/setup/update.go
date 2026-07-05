@@ -42,16 +42,23 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 		}
 		for _, server := range servers {
 			name := canonicalName(server.Name)
-			if name != "" {
-				present[strings.ToLower(name)] = true
-			}
 			if isWrapperRef(server, socketPath) {
+				if name != "" {
+					present[strings.ToLower(name)] = true
+				}
+				continue
+			}
+			if isHTTPWrapperRef(server) {
+				if name != "" {
+					present[strings.ToLower(name)] = true
+				}
 				continue
 			}
 			if !server.IsWrappable {
 				continue
 			}
 			server.Name = name
+			present[strings.ToLower(name)] = true
 			key := strings.ToLower(server.Name)
 			if _, exists := current[key]; !exists {
 				current[key] = server

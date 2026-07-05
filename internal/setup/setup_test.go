@@ -53,13 +53,14 @@ args = ["@playwright/mcp@latest"]
 	}
 }
 
-func TestPlanWrapsURLOnlyMCPAsStreamableHTTP(t *testing.T) {
+func TestPlanWrapsExplicitNoAuthRemoteMCPAsStreamableHTTP(t *testing.T) {
 	home := t.TempDir()
 	codexPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.remote]
+auth = "none"
 url = "https://example.test/mcp"
 `), 0644); err != nil {
 		t.Fatal(err)
@@ -89,6 +90,67 @@ url = "https://example.test/mcp"
 	content := string(plan.ClientUpdates[0].NewContent)
 	if !strings.Contains(content, `type = "streamable-http"`) || !strings.Contains(content, `url = "http://127.0.0.1:`) {
 		t.Fatalf("client update missing local streamable-http ref:\n%s", content)
+	}
+}
+
+func TestPlanSkipsURLOnlyRemoteMCPByDefault(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.remote]
+url = "https://example.test/mcp"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 0 {
+		t.Fatalf("URL-only remote MCP should not be wrapped by default: %#v", plan.WrapperConfigs)
+	}
+	if len(plan.ClientUpdates) != 0 {
+		t.Fatalf("URL-only remote MCP config should be preserved: %#v", plan.ClientUpdates)
+	}
+	if len(plan.Blockers) == 0 {
+		t.Fatal("expected blocker when only URL-only remote MCP is configured")
+	}
+}
+
+func TestPlanWrapsRemoteMCPWithAuthorizationHeader(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.remote]
+url = "https://example.test/mcp"
+
+[mcp_servers.remote.headers]
+Authorization = "Bearer test-token"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 1 {
+		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
+	}
+	cfg := plan.WrapperConfigs[0].Content
+	if cfg.Headers["Authorization"] != "Bearer test-token" {
+		t.Fatalf("headers = %#v", cfg.Headers)
 	}
 }
 
@@ -155,8 +217,33 @@ func TestMergeConfigPathsByNamePrefersNewWrapperPath(t *testing.T) {
 	mastergoNew := writeConfig(filepath.Join(dir, "mastergo-new.json"), "mastergo-magic-mcp")
 	figma := writeConfig(filepath.Join(dir, "figma.json"), "figma")
 
-	got := mergeConfigPathsByName([]string{context7, mastergoOld}, []string{mastergoNew, figma})
+	got := mergeConfigPathsByName([]string{context7, mastergoOld}, []string{mastergoNew, figma}, nil)
 	want := []string{context7, mastergoNew, figma}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("merged paths = %#v, want %#v", got, want)
+	}
+}
+
+func TestMergeConfigPathsByNameDropsSkippedExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig := func(path, name string) string {
+		t.Helper()
+		data := []byte(`{
+  "name": "` + name + `",
+  "url": "https://mcp.figma.com/mcp",
+  "protocol": "streamable-http"
+}
+`)
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	context7 := writeConfig(filepath.Join(dir, "context7.json"), "context7")
+	figma := writeConfig(filepath.Join(dir, "figma.json"), "figma")
+
+	got := mergeConfigPathsByName([]string{context7, figma}, nil, map[string]bool{"figma": true})
+	want := []string{context7}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("merged paths = %#v, want %#v", got, want)
 	}

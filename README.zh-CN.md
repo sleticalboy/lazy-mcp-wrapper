@@ -175,7 +175,8 @@ PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 {
   "name": "my-remote-mcp",
   "url": "https://example.com/mcp",
-  "protocol": "streamable-http"
+  "protocol": "streamable-http",
+  "auth": "none"
 }
 ```
 
@@ -185,6 +186,8 @@ PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 | --- | --- |
 | `streamable-http` | 推荐值。MCP 2025-03-26 标准；省略 `protocol` 时默认使用它。 |
 | `sse` | 已废弃的旧版 HTTP+SSE 传输，仅用于兼容旧服务。 |
+
+`setup` 对远程 HTTP MCP 默认采用保守策略：本地 HTTP、显式配置认证 header/token 的远程 HTTP、或显式标记 `auth = "none"` 的远程 HTTP 才会包装。Figma 这类由 Codex 管理 OAuth 的官方远程 MCP 会保持客户端直连，不会改写成本地 proxy。
 
 `setup` 包装远程 HTTP MCP 时，会通过共享 daemon 启动本地 HTTP proxy，并把客户端配置改写到类似 `http://127.0.0.1:54300` 的本地地址。端口会从 `54300` 开始自动递增分配，并写入生成的 wrapper config 的 `local_port` 字段。
 

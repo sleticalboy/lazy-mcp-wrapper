@@ -87,6 +87,8 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 		switch key {
 		case "type":
 			current.Type = parseTOMLString(value)
+		case "auth":
+			current.Auth = parseTOMLString(value)
 		case "command":
 			current.Command = parseTOMLString(value)
 		case "url":
@@ -152,6 +154,9 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 		}
 		lines = append(lines, fmt.Sprintf("[mcp_servers.%s]", quoteTableName(server.Name)))
 		lines = append(lines, fmt.Sprintf("type = %q", defaultType(server.Type)))
+		if server.Auth != "" {
+			lines = append(lines, fmt.Sprintf("auth = %q", server.Auth))
+		}
 		if server.URL != "" {
 			lines = append(lines, fmt.Sprintf("url = %q", server.URL))
 		} else {

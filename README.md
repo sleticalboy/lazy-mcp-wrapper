@@ -97,11 +97,14 @@ The recommended protocol is `streamable-http` (MCP spec 2025-03-26):
 {
   "name": "my-remote-mcp",
   "url": "https://example.com/mcp",
-  "protocol": "streamable-http"
+  "protocol": "streamable-http",
+  "auth": "none"
 }
 ```
 
 When `setup` wraps a remote HTTP server, it starts a local HTTP proxy through the shared daemon and rewrites the client config to a local URL such as `http://127.0.0.1:54300`. Ports are assigned automatically from `54300` upward and stored as `local_port` in the generated wrapper config.
+
+Remote HTTP setup is intentionally conservative. URL-only remote servers are left direct by default because many official remote MCP servers use client-managed OAuth. Add `auth: "none"` only for public unauthenticated remote MCP servers, or configure explicit auth headers such as `Authorization` / `X-API-Key` when the wrapper should forward credentials to the upstream server.
 
 The `protocol` field accepts:
 
@@ -180,7 +183,7 @@ Supported clients:
 - Claude Code: `~/.claude/settings.json`
 - Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
-The command wraps stdio MCP servers and remote HTTP MCP servers, skips `node_repl`, and uses `sharing: "session"` for Playwright. Remote HTTP servers are exposed to clients through local daemon-managed HTTP proxy ports.
+The command wraps stdio MCP servers, skips `node_repl`, and uses `sharing: "session"` for Playwright. Remote HTTP MCP servers are conservative by default: local HTTP servers, remote servers with explicit auth headers, and remote servers marked with `auth: "none"` can be wrapped; OAuth-managed remote MCP servers such as Figma stay configured directly in the client.
 
 ## Shared Daemon Mode
 

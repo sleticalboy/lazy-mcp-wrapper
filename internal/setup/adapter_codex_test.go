@@ -44,7 +44,7 @@ args = ["-y","@upstash/context7-mcp"]
 	}
 }
 
-func TestCodexAdapterTreatsURLOnlyServerAsStreamableHTTP(t *testing.T) {
+func TestCodexAdapterSkipsURLOnlyRemoteHTTPByDefault(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -64,7 +64,7 @@ url = "https://example.test/mcp"
 	if len(servers) != 1 {
 		t.Fatalf("servers = %#v", servers)
 	}
-	if servers[0].Type != "" || !servers[0].IsWrappable {
-		t.Fatalf("URL-only server should be wrappable with implicit streamable-http: %#v", servers[0])
+	if servers[0].Type != "" || servers[0].IsWrappable {
+		t.Fatalf("URL-only remote server should not be wrapped by default: %#v", servers[0])
 	}
 }

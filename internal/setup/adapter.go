@@ -5,6 +5,7 @@ import "encoding/json"
 type RawServer struct {
 	Name        string            `json:"name"`
 	Type        string            `json:"type"`
+	Auth        string            `json:"auth,omitempty"`
 	Command     string            `json:"command"`
 	Args        []string          `json:"args"`
 	Env         map[string]string `json:"env,omitempty"`

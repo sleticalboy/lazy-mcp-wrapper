@@ -20,6 +20,7 @@ type jsonConfig struct {
 
 type jsonServer struct {
 	Type    string            `json:"type,omitempty"`
+	Auth    string            `json:"auth,omitempty"`
 	Command string            `json:"command,omitempty"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
@@ -67,6 +68,7 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 		raw := RawServer{
 			Name:    name,
 			Type:    server.Type,
+			Auth:    server.Auth,
 			Command: server.Command,
 			Args:    server.Args,
 			Env:     server.Env,
@@ -114,6 +116,7 @@ func renderJSONConfig(path string, servers []RawServer) ([]byte, error) {
 		}
 		data, err := json.Marshal(jsonServer{
 			Type:    defaultType(server.Type),
+			Auth:    server.Auth,
 			Command: server.Command,
 			Args:    server.Args,
 			Env:     server.Env,
@@ -186,7 +189,16 @@ func isWrappable(server RawServer) bool {
 		}
 		return true
 	case "http", "streamable-http":
-		return server.URL != "" && !isHTTPWrapperRef(server)
+		if server.URL == "" || isHTTPWrapperRef(server) {
+			return false
+		}
+		if isLocalHTTPMCP(server) {
+			return true
+		}
+		if strings.EqualFold(server.Auth, "none") {
+			return true
+		}
+		return hasExplicitHTTPAuth(server)
 	case "sse":
 		return false // HTTP+SSE is no longer supported; use streamable-http
 	default:
@@ -194,10 +206,35 @@ func isWrappable(server RawServer) bool {
 	}
 }
 
+func isLocalHTTPMCP(server RawServer) bool {
+	parsed, err := url.Parse(strings.TrimSpace(server.URL))
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "127.0.0.1" || host == "::1" || strings.EqualFold(host, "localhost")
+}
+
+func hasExplicitHTTPAuth(server RawServer) bool {
+	for key, value := range server.Headers {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		key = strings.ToLower(key)
+		if key == "authorization" || key == "x-api-key" || strings.Contains(key, "token") || strings.Contains(key, "api-key") {
+			return true
+		}
+	}
+	return false
+}
+
 func isOAuthManagedRemoteMCP(server RawServer) bool {
 	rawURL := strings.TrimSpace(server.URL)
 	if rawURL == "" {
 		return false
+	}
+	if strings.EqualFold(server.Auth, "oauth") {
+		return true
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
