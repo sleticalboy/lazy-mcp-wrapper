@@ -245,6 +245,7 @@ func normalizeOptions(opts Options) Options {
 }
 
 func buildWrapperConfig(home string, server RawServer) wrapper.Config {
+	server = normalizeServerCommand(server)
 	sharing := "shared"
 	if isStateful(server.Name, server.Command, server.Args) {
 		sharing = "session"
@@ -272,6 +273,28 @@ func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 	cfg.Args = server.Args
 	cfg.Env = server.Env
 	return cfg
+}
+
+func normalizeServerCommand(server RawServer) RawServer {
+	if server.URL != "" || len(server.Args) > 0 {
+		return server
+	}
+	fields := strings.Fields(server.Command)
+	if len(fields) <= 1 || !isKnownInlineCommand(fields[0]) {
+		return server
+	}
+	server.Command = fields[0]
+	server.Args = fields[1:]
+	return server
+}
+
+func isKnownInlineCommand(command string) bool {
+	switch filepath.Base(command) {
+	case "npx", "npm", "pnpm", "yarn", "bun", "uvx":
+		return true
+	default:
+		return false
+	}
 }
 
 func isStateful(name, command string, args []string) bool {

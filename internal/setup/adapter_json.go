@@ -168,6 +168,9 @@ func isWrappable(server RawServer) bool {
 	if strings.EqualFold(server.Name, "node_repl") || strings.Contains(strings.ToLower(filepath.Base(server.Command)), "node_repl") {
 		return false
 	}
+	if isOAuthManagedRemoteMCP(server) {
+		return false
+	}
 	switch effectiveType(server) {
 	case "stdio":
 		if server.Command == "" {
@@ -189,6 +192,18 @@ func isWrappable(server RawServer) bool {
 	default:
 		return false
 	}
+}
+
+func isOAuthManagedRemoteMCP(server RawServer) bool {
+	rawURL := strings.TrimSpace(server.URL)
+	if rawURL == "" {
+		return false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "mcp.figma.com")
 }
 
 func isHTTPWrapperRef(server RawServer) bool {

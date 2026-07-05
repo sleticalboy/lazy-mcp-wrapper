@@ -50,8 +50,8 @@ func TestCodexAdapterTreatsURLOnlyServerAsStreamableHTTP(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`[mcp_servers.figma]
-url = "https://mcp.figma.com/mcp"
+	if err := os.WriteFile(path, []byte(`[mcp_servers.remote]
+url = "https://example.test/mcp"
 `), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

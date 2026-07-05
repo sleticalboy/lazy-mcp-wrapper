@@ -59,8 +59,8 @@ func TestPlanWrapsURLOnlyMCPAsStreamableHTTP(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
-url = "https://mcp.figma.com/mcp"
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.remote]
+url = "https://example.test/mcp"
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +80,8 @@ url = "https://mcp.figma.com/mcp"
 		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
 	}
 	cfg := plan.WrapperConfigs[0].Content
-	if cfg.Name != "figma" || cfg.URL != "https://mcp.figma.com/mcp" || cfg.Protocol != "streamable-http" || cfg.LocalPort == 0 {
-		t.Fatalf("figma wrapper config = %#v", cfg)
+	if cfg.Name != "remote" || cfg.URL != "https://example.test/mcp" || cfg.Protocol != "streamable-http" || cfg.LocalPort == 0 {
+		t.Fatalf("remote wrapper config = %#v", cfg)
 	}
 	if len(plan.ClientUpdates) != 1 {
 		t.Fatalf("client updates = %#v", plan.ClientUpdates)
@@ -89,6 +89,49 @@ url = "https://mcp.figma.com/mcp"
 	content := string(plan.ClientUpdates[0].NewContent)
 	if !strings.Contains(content, `type = "streamable-http"`) || !strings.Contains(content, `url = "http://127.0.0.1:`) {
 		t.Fatalf("client update missing local streamable-http ref:\n%s", content)
+	}
+}
+
+func TestPlanSkipsFigmaRemoteMCP(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 0 {
+		t.Fatalf("figma should not be wrapped: %#v", plan.WrapperConfigs)
+	}
+	if len(plan.ClientUpdates) != 0 {
+		t.Fatalf("figma config should be preserved: %#v", plan.ClientUpdates)
+	}
+	if len(plan.Blockers) == 0 {
+		t.Fatal("expected blocker when only figma is configured")
+	}
+}
+
+func TestBuildWrapperConfigSplitsKnownInlineCommand(t *testing.T) {
+	cfg := buildWrapperConfig(t.TempDir(), RawServer{
+		Name:    "playwright",
+		Command: "npx @playwright/mcp@latest",
+	})
+	if cfg.Command != "npx" {
+		t.Fatalf("command = %q", cfg.Command)
+	}
+	if len(cfg.Args) != 1 || cfg.Args[0] != "@playwright/mcp@latest" {
+		t.Fatalf("args = %#v", cfg.Args)
 	}
 }
 
