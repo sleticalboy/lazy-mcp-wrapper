@@ -38,11 +38,11 @@ args = ["client","--name","context7"]
 	if err := os.WriteFile(filepath.Join(wrapperDir, "context7.json"), []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", defaultLabel+".plist")
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
+	agentPath := defaultLaunchAgentPlan(Options{Home: home}).PlistPath
+	if err := os.MkdirAll(filepath.Dir(agentPath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(plistPath, []byte("plist"), 0644); err != nil {
+	if err := os.WriteFile(agentPath, []byte("agent"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,8 +68,8 @@ args = ["client","--name","context7"]
 	if _, err := os.Stat(wrapperDir); !os.IsNotExist(err) {
 		t.Fatalf("wrapper dir still exists: %v", err)
 	}
-	if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
-		t.Fatalf("plist still exists: %v", err)
+	if _, err := os.Stat(agentPath); !os.IsNotExist(err) {
+		t.Fatalf("daemon auto-start file still exists: %v", err)
 	}
 	if len(calls) < 2 {
 		t.Fatalf("launchctl calls = %#v", calls)
