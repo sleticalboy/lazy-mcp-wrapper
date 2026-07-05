@@ -18,10 +18,22 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 	order := []string{}
 	var current *RawServer
 	subsection := ""
+	var rawLines []string
+	flushRaw := func() {
+		if current != nil && len(rawLines) > 0 {
+			raw := strings.Join(rawLines, "\n")
+			if len(current.Raw) > 0 {
+				current.Raw = append(current.Raw, '\n')
+			}
+			current.Raw = append(current.Raw, raw...)
+		}
+		rawLines = nil
+	}
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if match := mcpSectionRE.FindStringSubmatch(trimmed); match != nil {
+			flushRaw()
 			name := unquoteTableName(match[1])
 			current = serversByName[name]
 			if current == nil {
@@ -30,6 +42,7 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 				order = append(order, name)
 			}
 			subsection = match[2]
+			rawLines = append(rawLines, line)
 			if subsection == "env" && current.Env == nil {
 				current.Env = map[string]string{}
 			}
@@ -39,13 +52,18 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			flushRaw()
 			current = nil
 			subsection = ""
 			continue
 		}
 		if current == nil || trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			if current != nil {
+				rawLines = append(rawLines, line)
+			}
 			continue
 		}
+		rawLines = append(rawLines, line)
 		key, value, ok := strings.Cut(trimmed, "=")
 		if !ok {
 			continue
@@ -81,6 +99,7 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 			current.Args = args
 		}
 	}
+	flushRaw()
 	for _, name := range order {
 		server := *serversByName[name]
 		server.IsWrappable = isWrappable(server)
@@ -127,13 +146,19 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 		if i > 0 {
 			lines = append(lines, "")
 		}
+		if !server.IsWrappable && len(server.Raw) > 0 {
+			lines = append(lines, strings.Split(strings.TrimRight(string(server.Raw), "\n"), "\n")...)
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("[mcp_servers.%s]", quoteTableName(server.Name)))
 		lines = append(lines, fmt.Sprintf("type = %q", defaultType(server.Type)))
 		if server.URL != "" {
 			lines = append(lines, fmt.Sprintf("url = %q", server.URL))
 		} else {
 			lines = append(lines, fmt.Sprintf("command = %q", server.Command))
-			lines = append(lines, "args = "+formatStringArray(server.Args))
+			if len(server.Args) > 0 {
+				lines = append(lines, "args = "+formatStringArray(server.Args))
+			}
 		}
 		if len(server.Env) > 0 {
 			lines = append(lines, fmt.Sprintf("[mcp_servers.%s.env]", quoteTableName(server.Name)))
