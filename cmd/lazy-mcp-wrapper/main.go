@@ -10,10 +10,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
+	"github.com/binlee/lazy-mcp-wrapper/internal/oauth"
 	"github.com/binlee/lazy-mcp-wrapper/internal/setup"
 	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
 )
@@ -46,6 +49,9 @@ func main() {
 			return
 		case "setup":
 			runSetup(os.Args[2:])
+			return
+		case "auth":
+			runAuth(os.Args[2:])
 			return
 		}
 	}
@@ -340,6 +346,372 @@ func runControl(args []string, control string) {
 	if !resp.OK {
 		os.Exit(1)
 	}
+}
+
+func runAuth(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: lazy-mcp-wrapper auth <status|login|logout> [name]")
+		os.Exit(2)
+	}
+	subcmd := args[0]
+
+	resolveHome := func(home string) string {
+		if home != "" {
+			return home
+		}
+		resolved, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth: resolve home: %v\n", err)
+			os.Exit(2)
+		}
+		return resolved
+	}
+
+	switch subcmd {
+	case "status":
+		home, format, rest, parseErr := parseAuthFlags(args[1:], true)
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth status: %v\n", parseErr)
+			os.Exit(2)
+		}
+		if len(rest) > 1 {
+			fmt.Fprintln(os.Stderr, "usage: lazy-mcp-wrapper auth status [name] [--home DIR] [--format table|json]")
+			os.Exit(2)
+		}
+		store := oauth.NewFileStore(resolveHome(home))
+		var (
+			value     any
+			statusErr error
+		)
+		if len(rest) == 1 {
+			value, statusErr = store.Status(rest[0])
+		} else {
+			value, statusErr = store.ListStatuses()
+		}
+		if statusErr != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth status: %v\n", statusErr)
+			os.Exit(1)
+		}
+		switch format {
+		case "json":
+			data, _ := json.MarshalIndent(value, "", "  ")
+			fmt.Println(string(data))
+		case "table":
+			printAuthStatusTable(os.Stdout, value)
+		default:
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth status: unsupported format %q\n", format)
+			os.Exit(2)
+		}
+	case "login":
+		loginFlags, rest, err := parseAuthLoginFlags(args[1:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth login: %v\n", err)
+			os.Exit(2)
+		}
+		if len(rest) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: lazy-mcp-wrapper auth login <name> [--config PATH|--url URL] [--client-id ID] [--token-url URL] [--scope SCOPE] [--callback-port PORT] [--timeout 5m] [--no-open]")
+			os.Exit(2)
+		}
+		name := rest[0]
+		home := resolveHome(loginFlags.home)
+		loginOpts, err := buildOAuthLoginOptions(home, name, loginFlags)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth login: %v\n", err)
+			os.Exit(2)
+		}
+		loginOpts.Out = os.Stdout
+		ctx := context.Background()
+		var cancel context.CancelFunc
+		if loginFlags.timeout > 0 {
+			ctx, cancel = context.WithTimeout(ctx, loginFlags.timeout)
+			defer cancel()
+		}
+		status, err := oauth.Login(ctx, loginOpts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth login: %v\n", err)
+			os.Exit(1)
+		}
+		printAuthStatusTable(os.Stdout, status)
+	case "logout":
+		home, _, rest, err := parseAuthFlags(args[1:], false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth logout: %v\n", err)
+			os.Exit(2)
+		}
+		if len(rest) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: lazy-mcp-wrapper auth logout <name>")
+			os.Exit(2)
+		}
+		store := oauth.NewFileStore(resolveHome(home))
+		if err := store.Delete(rest[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth logout: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stdout, "Removed OAuth credential for %s\n", rest[0])
+	default:
+		fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper auth: unknown subcommand %q\n", subcmd)
+		os.Exit(2)
+	}
+}
+
+type authLoginFlags struct {
+	home         string
+	configPath   string
+	url          string
+	clientID     string
+	tokenURL     string
+	resource     string
+	scopes       []string
+	callbackPort int
+	openBrowser  bool
+	timeout      time.Duration
+}
+
+func parseAuthLoginFlags(args []string) (authLoginFlags, []string, error) {
+	flags := authLoginFlags{openBrowser: true, timeout: 5 * time.Minute}
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--home":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --home")
+			}
+			flags.home = args[i]
+		case strings.HasPrefix(arg, "--home="):
+			flags.home = strings.TrimPrefix(arg, "--home=")
+		case arg == "--config":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --config")
+			}
+			flags.configPath = args[i]
+		case strings.HasPrefix(arg, "--config="):
+			flags.configPath = strings.TrimPrefix(arg, "--config=")
+		case arg == "--url":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --url")
+			}
+			flags.url = args[i]
+		case strings.HasPrefix(arg, "--url="):
+			flags.url = strings.TrimPrefix(arg, "--url=")
+		case arg == "--client-id":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --client-id")
+			}
+			flags.clientID = args[i]
+		case strings.HasPrefix(arg, "--client-id="):
+			flags.clientID = strings.TrimPrefix(arg, "--client-id=")
+		case arg == "--token-url":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --token-url")
+			}
+			flags.tokenURL = args[i]
+		case strings.HasPrefix(arg, "--token-url="):
+			flags.tokenURL = strings.TrimPrefix(arg, "--token-url=")
+		case arg == "--resource":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --resource")
+			}
+			flags.resource = args[i]
+		case strings.HasPrefix(arg, "--resource="):
+			flags.resource = strings.TrimPrefix(arg, "--resource=")
+		case arg == "--scope":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --scope")
+			}
+			flags.scopes = append(flags.scopes, args[i])
+		case strings.HasPrefix(arg, "--scope="):
+			flags.scopes = append(flags.scopes, strings.TrimPrefix(arg, "--scope="))
+		case arg == "--timeout":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --timeout")
+			}
+			timeout, err := time.ParseDuration(args[i])
+			if err != nil {
+				return flags, nil, fmt.Errorf("invalid --timeout: %w", err)
+			}
+			flags.timeout = timeout
+		case strings.HasPrefix(arg, "--timeout="):
+			timeout, err := time.ParseDuration(strings.TrimPrefix(arg, "--timeout="))
+			if err != nil {
+				return flags, nil, fmt.Errorf("invalid --timeout: %w", err)
+			}
+			flags.timeout = timeout
+		case arg == "--callback-port":
+			i++
+			if i >= len(args) {
+				return flags, nil, fmt.Errorf("missing value for --callback-port")
+			}
+			port, err := parsePositiveInt(args[i])
+			if err != nil {
+				return flags, nil, fmt.Errorf("invalid --callback-port: %w", err)
+			}
+			flags.callbackPort = port
+		case strings.HasPrefix(arg, "--callback-port="):
+			port, err := parsePositiveInt(strings.TrimPrefix(arg, "--callback-port="))
+			if err != nil {
+				return flags, nil, fmt.Errorf("invalid --callback-port: %w", err)
+			}
+			flags.callbackPort = port
+		case arg == "--no-open":
+			flags.openBrowser = false
+		case strings.HasPrefix(arg, "-"):
+			return flags, nil, fmt.Errorf("unknown flag %s", arg)
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return flags, rest, nil
+}
+
+func buildOAuthLoginOptions(home, name string, flags authLoginFlags) (oauth.LoginOptions, error) {
+	cfg := wrapper.Config{Name: name}
+	configPath := flags.configPath
+	if configPath == "" {
+		candidate := filepath.Join(home, ".lazy-mcp-wrapper", "wrappers", name+".json")
+		if _, err := os.Stat(candidate); err == nil {
+			configPath = candidate
+		}
+	}
+	if configPath != "" {
+		loaded, err := loadOAuthLoginConfig(configPath, home, name)
+		if err != nil {
+			return oauth.LoginOptions{}, err
+		}
+		cfg = loaded
+	} else if loaded, _, err := setup.FindClientWrapperConfig(home, name); err == nil {
+		cfg = loaded
+	}
+	if flags.url != "" {
+		cfg.URL = flags.url
+	}
+	if flags.clientID != "" {
+		cfg.OAuthClientID = flags.clientID
+	}
+	if flags.resource != "" {
+		cfg.OAuthResource = flags.resource
+	}
+	if len(flags.scopes) > 0 {
+		cfg.OAuthScopes = flags.scopes
+	}
+	if cfg.URL == "" {
+		return oauth.LoginOptions{}, fmt.Errorf("missing remote MCP URL; pass --url or --config")
+	}
+	store := oauth.NewFileStore(home)
+	if cfg.OAuthStoreDir != "" {
+		store = &oauth.FileStore{Dir: cfg.OAuthStoreDir}
+	}
+	return oauth.LoginOptions{
+		Name:         name,
+		ServerURL:    cfg.URL,
+		ClientID:     cfg.OAuthClientID,
+		TokenURL:     flags.tokenURL,
+		Resource:     cfg.OAuthResource,
+		Scopes:       cfg.OAuthScopes,
+		Store:        store,
+		CallbackPort: flags.callbackPort,
+		OpenBrowser:  flags.openBrowser,
+	}, nil
+}
+
+func loadOAuthLoginConfig(path, home, name string) (wrapper.Config, error) {
+	loaded, wrapperErr := wrapper.LoadConfig(path)
+	if wrapperErr == nil {
+		return loaded, nil
+	}
+	loaded, clientErr := setup.LoadClientWrapperConfig(path, home, name)
+	if clientErr == nil {
+		return loaded, nil
+	}
+	return wrapper.Config{}, fmt.Errorf("load config %s: wrapper config error: %v; client config error: %v", path, wrapperErr, clientErr)
+}
+
+func parsePositiveInt(value string) (int, error) {
+	out, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	if out < 0 {
+		return 0, fmt.Errorf("must be >= 0")
+	}
+	return out, nil
+}
+
+func parseAuthFlags(args []string, allowFormat bool) (home string, format string, rest []string, err error) {
+	format = "table"
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--home":
+			i++
+			if i >= len(args) {
+				return "", "", nil, fmt.Errorf("missing value for --home")
+			}
+			home = args[i]
+		case strings.HasPrefix(arg, "--home="):
+			home = strings.TrimPrefix(arg, "--home=")
+		case arg == "--format":
+			if !allowFormat {
+				return "", "", nil, fmt.Errorf("--format is only supported by auth status")
+			}
+			i++
+			if i >= len(args) {
+				return "", "", nil, fmt.Errorf("missing value for --format")
+			}
+			format = args[i]
+		case strings.HasPrefix(arg, "--format="):
+			if !allowFormat {
+				return "", "", nil, fmt.Errorf("--format is only supported by auth status")
+			}
+			format = strings.TrimPrefix(arg, "--format=")
+		case strings.HasPrefix(arg, "-"):
+			return "", "", nil, fmt.Errorf("unknown flag %s", arg)
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return home, format, rest, nil
+}
+
+func printAuthStatusTable(out io.Writer, value any) {
+	statuses, ok := value.([]oauth.Status)
+	if !ok {
+		statuses = []oauth.Status{value.(oauth.Status)}
+	}
+	if len(statuses) == 0 {
+		fmt.Fprintln(out, "No OAuth credentials found")
+		return
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tAUTH\tEXPIRED\tEXPIRES\tRESOURCE\tPATH")
+	for _, status := range statuses {
+		authenticated := "no"
+		if status.Authenticated {
+			authenticated = "yes"
+		}
+		expired := "no"
+		if status.Expired {
+			expired = "yes"
+		}
+		expires := "-"
+		if status.Expiry != nil {
+			expires = formatTime(*status.Expiry)
+		}
+		resource := status.Resource
+		if resource == "" {
+			resource = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", status.Name, authenticated, expired, expires, resource, status.Path)
+	}
+	_ = tw.Flush()
 }
 
 func runSetup(args []string) {

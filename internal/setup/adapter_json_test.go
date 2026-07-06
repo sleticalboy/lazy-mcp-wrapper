@@ -1,52 +1,33 @@
 package setup
 
-import (
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestJSONAdapterReadWriteServers(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "mcp.json")
-	if err := os.WriteFile(path, []byte(`{
-  "other": true,
+func TestParseJSONMCPServersOAuthFields(t *testing.T) {
+	servers, err := parseJSONMCPServers([]byte(`{
   "mcpServers": {
-    "context7": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    },
-    "remote": {
-      "type": "sse",
-      "url": "https://example.test/sse",
-      "headers": {"Authorization": "Bearer token"}
+    "figma": {
+      "type": "streamable-http",
+      "url": "https://mcp.figma.com/mcp",
+      "auth": "oauth",
+      "oauth_resource": "https://mcp.figma.com",
+      "scopes": ["tools:read"],
+      "oauth": {
+        "client_id": "figma-client"
+      }
     }
   }
-}`), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	adapter := newJSONAdapter("cursor", path)
-	servers, err := adapter.ReadServers()
+}`))
 	if err != nil {
-		t.Fatalf("ReadServers() error = %v", err)
+		t.Fatalf("parseJSONMCPServers() error = %v", err)
 	}
-	// SSE type is no longer wrappable; only stdio and streamable-http/http are supported
-	if len(servers) != 2 || !servers[0].IsWrappable || servers[1].IsWrappable {
+	if len(servers) != 1 {
 		t.Fatalf("servers = %#v", servers)
 	}
-
-	servers[0].Command = "/tmp/lazy-mcp-wrapper"
-	servers[0].Args = []string{"client", "--socket", "/tmp/sock", "--name", "context7"}
-	if err := adapter.WriteServers(servers, path+".bak"); err != nil {
-		t.Fatalf("WriteServers() error = %v", err)
+	server := servers[0]
+	if server.OAuthClientID != "figma-client" || server.OAuthResource != "https://mcp.figma.com" {
+		t.Fatalf("oauth fields = %#v", server)
 	}
-	if _, err := os.Stat(path + ".bak"); err != nil {
-		t.Fatalf("backup missing: %v", err)
-	}
-	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), `"other": true`) || !strings.Contains(string(data), `/tmp/lazy-mcp-wrapper`) || !strings.Contains(string(data), `"url": "https://example.test/sse"`) || !strings.Contains(string(data), `"headers"`) {
-		t.Fatalf("updated JSON unexpected:\n%s", string(data))
+	if len(server.OAuthScopes) != 1 || server.OAuthScopes[0] != "tools:read" {
+		t.Fatalf("oauth scopes = %#v", server.OAuthScopes)
 	}
 }

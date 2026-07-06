@@ -34,6 +34,17 @@
 
 ---
 
+## 方向五：官方 Go SDK 与远程 OAuth MCP
+
+**目标**：降低 Streamable HTTP 和 OAuth 远程 MCP 的协议维护成本，同时保留 lazy proxy 的核心行为。详见 [go-sdk-oauth-plan.md](go-sdk-oauth-plan.md)。
+
+- [x] **0. SDK 适配探针**：引入官方 Go SDK 的最小编译/测试探针，不改变现有运行行为
+- [x] **1. SDK-backed remote HTTP upstream**：已增加 opt-in SDK Streamable HTTP backend，保留当前 stdio proxy、daemon、setup 模型
+- [x] **2. OAuth-aware remote HTTP upstream 基础**：已增加 `auth login/logout/status`、文件凭据存储、Bearer 注入、刷新、setup 凭据门控
+- [ ] **3. Figma 验证**：动态 client registration 已实测 403；下一步验证 Codex-style `oauth.client_id` 预注册 client 是否可用，并决定默认策略
+
+---
+
 ## 方向四：Windows 支持
 
 **目标**：覆盖 Windows 开发者，扩大用户群。详见 [plan-windows.md](plan-windows.md)。

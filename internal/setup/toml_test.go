@@ -97,3 +97,44 @@ hide_full_access_warning = true
 		t.Fatalf("output should not contain args = null:\n%s", out)
 	}
 }
+
+func TestParseAndRenderTOMLOAuthFields(t *testing.T) {
+	input := []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+auth = "oauth"
+oauth_resource = "https://mcp.figma.com"
+scopes = ["tools:read","files:read"]
+
+[mcp_servers.figma.oauth]
+client_id = "figma-client"
+`)
+
+	servers, err := parseTOMLMCPServers(input)
+	if err != nil {
+		t.Fatalf("parseTOMLMCPServers() error = %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("servers = %#v", servers)
+	}
+	server := servers[0]
+	if server.Auth != "oauth" || server.OAuthClientID != "figma-client" || server.OAuthResource != "https://mcp.figma.com" {
+		t.Fatalf("oauth fields = %#v", server)
+	}
+	if len(server.OAuthScopes) != 2 || server.OAuthScopes[0] != "tools:read" || server.OAuthScopes[1] != "files:read" {
+		t.Fatalf("scopes = %#v", server.OAuthScopes)
+	}
+
+	server.Raw = nil
+	out := strings.Join(renderTOMLMCPServers([]RawServer{server}), "\n")
+	for _, want := range []string{
+		`auth = "oauth"`,
+		`oauth_resource = "https://mcp.figma.com"`,
+		`scopes = ["tools:read","files:read"]`,
+		`[mcp_servers.figma.oauth]`,
+		`client_id = "figma-client"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}

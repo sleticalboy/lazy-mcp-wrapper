@@ -55,6 +55,13 @@ func PrintUpdatePlan(out io.Writer, plan UpdatePlan) {
 	for _, path := range plan.Removed {
 		fmt.Fprintf(out, "  - %-22s %s\n", strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), "[removed from all clients]")
 	}
+	if len(plan.ClientUpdates) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Client config changes:")
+		for _, update := range plan.ClientUpdates {
+			fmt.Fprintf(out, "  %-14s %s\n", update.Kind, update.ConfigPath)
+		}
+	}
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "Daemon config: %s\n", plan.DaemonConfig.ConfigPath)
 	fmt.Fprintf(out, "Socket:        %s\n", plan.DaemonConfig.SocketPath)

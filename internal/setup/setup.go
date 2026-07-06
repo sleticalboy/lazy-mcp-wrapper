@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
+	oauthstore "github.com/binlee/lazy-mcp-wrapper/internal/oauth"
 	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
 )
 
@@ -83,6 +84,8 @@ func NewPlan(opts Options) (Plan, error) {
 	}
 
 	wrappable := map[string]RawServer{}
+	oauthSkipped := map[string]bool{}
+	chatGPTSkipped := map[string]bool{}
 	for _, adapter := range scanClients(opts.Home) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
@@ -99,14 +102,30 @@ func NewPlan(opts Options) (Plan, error) {
 			if isWrapperRef(server, socketPath) || isHTTPWrapperRef(server) {
 				continue
 			}
-			if server.IsWrappable {
+			if canWrapServer(opts.Home, server) {
+				server.IsWrappable = true
 				key := strings.ToLower(server.Name)
 				if _, exists := wrappable[key]; !exists {
 					wrappable[key] = server
 				}
 			} else {
 				skippedByName[strings.ToLower(server.Name)] = true
+				if isChatGPTManagedRemoteMCP(server) {
+					chatGPTSkipped[strings.ToLower(server.Name)] = true
+				} else if isOAuthManagedRemoteMCP(server) {
+					oauthSkipped[strings.ToLower(server.Name)] = true
+				}
 			}
+		}
+	}
+	for name := range chatGPTSkipped {
+		if _, willWrap := wrappable[name]; !willWrap {
+			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: ChatGPT-auth remote MCP cannot be wrapped; keep it direct in Codex", name))
+		}
+	}
+	for name := range oauthSkipped {
+		if _, willWrap := wrappable[name]; !willWrap {
+			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: OAuth credential not found or expired; run lazy-mcp-wrapper auth login %s --url <remote-mcp-url>", name, name))
 		}
 	}
 
@@ -201,21 +220,28 @@ func (p Plan) Apply(opts Options) error {
 		}
 	}
 	if len(p.ClientUpdates) > 0 && shouldApply(opts, "Step 3/3: Update client configs with backups?") {
-		adaptersByKind := map[string]ClientAdapter{}
-		for _, adapter := range scanClients(opts.Home) {
-			adaptersByKind[adapter.Kind()] = adapter
+		if err := writeClientUpdates(opts.Home, p.ClientUpdates); err != nil {
+			return err
 		}
-		for _, update := range p.ClientUpdates {
-			if err := os.MkdirAll(filepath.Dir(update.BackupPath), 0755); err != nil {
-				return err
-			}
-			adapter := adaptersByKind[update.Kind]
-			if adapter == nil {
-				return fmt.Errorf("adapter not found for %s", update.Kind)
-			}
-			if err := adapter.WriteServers(update.Servers, update.BackupPath); err != nil {
-				return err
-			}
+	}
+	return nil
+}
+
+func writeClientUpdates(home string, updates []ClientUpdate) error {
+	adaptersByKind := map[string]ClientAdapter{}
+	for _, adapter := range scanClients(home) {
+		adaptersByKind[adapter.Kind()] = adapter
+	}
+	for _, update := range updates {
+		if err := os.MkdirAll(filepath.Dir(update.BackupPath), 0755); err != nil {
+			return err
+		}
+		adapter := adaptersByKind[update.Kind]
+		if adapter == nil {
+			return fmt.Errorf("adapter not found for %s", update.Kind)
+		}
+		if err := adapter.WriteServers(update.Servers, update.BackupPath); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -256,7 +282,7 @@ func normalizeOptions(opts Options) Options {
 func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 	server = normalizeServerCommand(server)
 	sharing := "shared"
-	if isStateful(server.Name, server.Command, server.Args) {
+	if isStateful(server.Name, server.Command, server.Args) || isOAuthManagedRemoteMCP(server) {
 		sharing = "session"
 	}
 	cfg := wrapper.Config{
@@ -273,6 +299,13 @@ func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 	if server.URL != "" {
 		cfg.URL = server.URL
 		cfg.Protocol = effectiveType(server)
+		cfg.Auth = server.Auth
+		if cfg.Auth == "" && isOAuthManagedRemoteMCP(server) {
+			cfg.Auth = "oauth"
+		}
+		cfg.OAuthClientID = server.OAuthClientID
+		cfg.OAuthResource = server.OAuthResource
+		cfg.OAuthScopes = server.OAuthScopes
 		cfg.Headers = server.Headers
 		cfg.RealProtocol = ""
 		cfg.RealFraming = ""
@@ -282,6 +315,20 @@ func buildWrapperConfig(home string, server RawServer) wrapper.Config {
 	cfg.Args = server.Args
 	cfg.Env = server.Env
 	return cfg
+}
+
+func canWrapServer(home string, server RawServer) bool {
+	if server.IsWrappable {
+		return true
+	}
+	if !isOAuthManagedRemoteMCP(server) {
+		return false
+	}
+	status, err := oauthstore.NewFileStore(home).Status(server.Name)
+	if err != nil {
+		return false
+	}
+	return status.Authenticated && status.HasAccessToken && !status.Expired
 }
 
 func normalizeServerCommand(server RawServer) RawServer {
@@ -380,11 +427,16 @@ func replaceWithWrapperRefs(servers []RawServer, binaryPath, socketPath string, 
 	out := make([]RawServer, 0, len(servers))
 	for _, server := range servers {
 		next := server
-		if server.IsWrappable {
-			next.Name = canonicalName(server.Name)
+		name := canonicalName(server.Name)
+		_, hasLocalHTTP := localPorts[strings.ToLower(name)]
+		if server.IsWrappable || (server.URL != "" && hasLocalHTTP) {
+			next.Name = name
 			if server.URL != "" {
 				next.Type = effectiveType(server)
 				next.Auth = ""
+				next.OAuthClientID = ""
+				next.OAuthResource = ""
+				next.OAuthScopes = nil
 				next.URL = localHTTPAddr(localPorts[strings.ToLower(next.Name)])
 				next.Command = ""
 				next.Args = nil

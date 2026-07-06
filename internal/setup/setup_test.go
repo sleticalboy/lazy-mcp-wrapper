@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	oauthstore "github.com/binlee/lazy-mcp-wrapper/internal/oauth"
 )
 
 func TestPlanBuildsWrapperConfigsAndClientUpdates(t *testing.T) {
@@ -83,6 +85,9 @@ url = "https://example.test/mcp"
 	cfg := plan.WrapperConfigs[0].Content
 	if cfg.Name != "remote" || cfg.URL != "https://example.test/mcp" || cfg.Protocol != "streamable-http" || cfg.LocalPort == 0 {
 		t.Fatalf("remote wrapper config = %#v", cfg)
+	}
+	if cfg.Auth != "none" {
+		t.Fatalf("auth = %q, want none", cfg.Auth)
 	}
 	if len(plan.ClientUpdates) != 1 {
 		t.Fatalf("client updates = %#v", plan.ClientUpdates)
@@ -162,6 +167,12 @@ func TestPlanSkipsFigmaRemoteMCP(t *testing.T) {
 	}
 	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
 url = "https://mcp.figma.com/mcp"
+auth = "oauth"
+oauth_resource = "https://mcp.figma.com"
+scopes = ["tools:read"]
+
+[mcp_servers.figma.oauth]
+client_id = "figma-client"
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +192,132 @@ url = "https://mcp.figma.com/mcp"
 	}
 	if len(plan.Blockers) == 0 {
 		t.Fatal("expected blocker when only figma is configured")
+	}
+	if !strings.Contains(strings.Join(plan.Blockers, "\n"), "auth login figma") {
+		t.Fatalf("blockers = %#v, want auth login hint", plan.Blockers)
+	}
+}
+
+func TestPlanWrapsFigmaRemoteMCPWithOAuthCredential(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+auth = "oauth"
+oauth_resource = "https://mcp.figma.com"
+scopes = ["tools:read"]
+
+[mcp_servers.figma.oauth]
+client_id = "figma-client"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := oauthstore.NewFileStore(home).Save(oauthstore.Credential{
+		Name:        "figma",
+		ServerURL:   "https://mcp.figma.com/mcp",
+		AccessToken: "stored-token",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.Blockers) != 0 {
+		t.Fatalf("blockers = %#v", plan.Blockers)
+	}
+	if len(plan.WrapperConfigs) != 1 {
+		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
+	}
+	cfg := plan.WrapperConfigs[0].Content
+	if cfg.Name != "figma" || cfg.Auth != "oauth" || cfg.Sharing != "session" || cfg.URL != "https://mcp.figma.com/mcp" || cfg.LocalPort == 0 {
+		t.Fatalf("figma wrapper config = %#v", cfg)
+	}
+	if cfg.OAuthClientID != "figma-client" || cfg.OAuthResource != "https://mcp.figma.com" {
+		t.Fatalf("figma oauth fields = %#v", cfg)
+	}
+	if len(cfg.OAuthScopes) != 1 || cfg.OAuthScopes[0] != "tools:read" {
+		t.Fatalf("figma oauth scopes = %#v", cfg.OAuthScopes)
+	}
+	if len(plan.ClientUpdates) != 1 {
+		t.Fatalf("client updates = %#v", plan.ClientUpdates)
+	}
+	content := string(plan.ClientUpdates[0].NewContent)
+	if !strings.Contains(content, `type = "streamable-http"`) || !strings.Contains(content, `url = "http://127.0.0.1:`) || strings.Contains(content, `mcp.figma.com`) {
+		t.Fatalf("client update did not replace figma with local HTTP wrapper:\n%s", content)
+	}
+	if strings.Contains(content, `oauth_resource`) || strings.Contains(content, `[mcp_servers.figma.oauth]`) || strings.Contains(content, `scopes =`) {
+		t.Fatalf("client update should remove remote oauth fields:\n%s", content)
+	}
+}
+
+func TestPlanSkipsOAuthRemoteMCP(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.remote]
+url = "https://example.test/mcp"
+auth = "oauth"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 0 {
+		t.Fatalf("oauth remote should not be wrapped: %#v", plan.WrapperConfigs)
+	}
+	if len(plan.ClientUpdates) != 0 {
+		t.Fatalf("oauth remote config should be preserved: %#v", plan.ClientUpdates)
+	}
+	if len(plan.Blockers) == 0 {
+		t.Fatal("expected blocker when only oauth remote MCP is configured")
+	}
+}
+
+func TestPlanSkipsChatGPTAuthRemoteMCP(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+auth = "chatgpt"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 0 {
+		t.Fatalf("chatgpt-auth remote should not be wrapped: %#v", plan.WrapperConfigs)
+	}
+	blockers := strings.Join(plan.Blockers, "\n")
+	if !strings.Contains(blockers, "ChatGPT-auth remote MCP cannot be wrapped") {
+		t.Fatalf("blockers = %#v, want chatgpt-auth blocker", plan.Blockers)
+	}
+	if strings.Contains(blockers, "auth login figma") {
+		t.Fatalf("blockers should not suggest OAuth login for chatgpt auth: %#v", plan.Blockers)
 	}
 }
 

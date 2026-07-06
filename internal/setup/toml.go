@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var mcpSectionRE = regexp.MustCompile(`^\s*\[mcp_servers\.((?:"[^"]+"|[A-Za-z0-9_-]+))(?:\.(env|headers))?\]\s*$`)
+var mcpSectionRE = regexp.MustCompile(`^\s*\[mcp_servers\.((?:"[^"]+"|[A-Za-z0-9_-]+))(?:\.(env|headers|oauth))?\]\s*$`)
 
 func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 	lines := strings.Split(string(data), "\n")
@@ -83,12 +83,25 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 			}
 			current.Headers[key] = parseTOMLString(value)
 			continue
+		case "oauth":
+			if key == "client_id" {
+				current.OAuthClientID = parseTOMLString(value)
+			}
+			continue
 		}
 		switch key {
 		case "type":
 			current.Type = parseTOMLString(value)
 		case "auth":
 			current.Auth = parseTOMLString(value)
+		case "oauth_resource":
+			current.OAuthResource = parseTOMLString(value)
+		case "scopes":
+			scopes, err := parseTOMLStringArray(value)
+			if err != nil {
+				return nil, err
+			}
+			current.OAuthScopes = scopes
 		case "command":
 			current.Command = parseTOMLString(value)
 		case "url":
@@ -157,6 +170,12 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 		if server.Auth != "" {
 			lines = append(lines, fmt.Sprintf("auth = %q", server.Auth))
 		}
+		if server.OAuthResource != "" {
+			lines = append(lines, fmt.Sprintf("oauth_resource = %q", server.OAuthResource))
+		}
+		if len(server.OAuthScopes) > 0 {
+			lines = append(lines, "scopes = "+formatStringArray(server.OAuthScopes))
+		}
 		if server.URL != "" {
 			lines = append(lines, fmt.Sprintf("url = %q", server.URL))
 		} else {
@@ -186,6 +205,10 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 			for _, key := range keys {
 				lines = append(lines, fmt.Sprintf("%s = %q", key, server.Headers[key]))
 			}
+		}
+		if server.OAuthClientID != "" {
+			lines = append(lines, fmt.Sprintf("[mcp_servers.%s.oauth]", quoteTableName(server.Name)))
+			lines = append(lines, fmt.Sprintf("client_id = %q", server.OAuthClientID))
 		}
 	}
 	return lines

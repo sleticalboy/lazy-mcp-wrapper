@@ -380,7 +380,15 @@ func (p *Proxy) ensureHTTPReal(ctx context.Context) (realBackend, error) {
 	if init.ProtocolVersion == "" {
 		init.ProtocolVersion = "2024-11-05"
 	}
-	client, err := startHTTPReal(ctx, p.cfg, p.log, init)
+	var (
+		client realBackend
+		err    error
+	)
+	if p.cfg.UseSDKHTTPBackend() {
+		client, err = startSDKHTTPReal(ctx, p.cfg, p.log, init)
+	} else {
+		client, err = startHTTPReal(ctx, p.cfg, p.log, init)
+	}
 	if err != nil {
 		if p.cfg.LogFile != "" {
 			return nil, fmt.Errorf("%w\n  check logs: tail -f %s", err, p.cfg.LogFile)

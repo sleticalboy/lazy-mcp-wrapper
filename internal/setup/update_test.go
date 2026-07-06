@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	oauthstore "github.com/binlee/lazy-mcp-wrapper/internal/oauth"
 )
 
 func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
@@ -53,7 +56,7 @@ func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
 	writeWrapper("context7")
 	writeWrapper("old-tool")
 
-	if err := Update(Options{Home: home, YesAll: true}); err != nil {
+	if err := Update(Options{Home: home, BinaryPath: "/bin/lazy-mcp-wrapper", YesAll: true}); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(wrapperDir, "new-tool.json")); err != nil {
@@ -83,8 +86,11 @@ func TestUpdateAddsAndRemovesWrapperConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(afterClientConfig) != string(originalClientConfig) {
-		t.Fatalf("client config changed:\n%s", string(afterClientConfig))
+	if string(afterClientConfig) == string(originalClientConfig) {
+		t.Fatal("client config was not updated")
+	}
+	if !strings.Contains(string(afterClientConfig), `"--name"`) || !strings.Contains(string(afterClientConfig), `"new-tool"`) {
+		t.Fatalf("client config missing new wrapper ref:\n%s", string(afterClientConfig))
 	}
 }
 
@@ -105,11 +111,64 @@ func TestUpdateBlocksWhenNoWrapperConfigsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Update(Options{Home: home, YesAll: true})
+	err := Update(Options{Home: home, BinaryPath: "/bin/lazy-mcp-wrapper", YesAll: true})
 	if err == nil {
 		t.Fatal("Update() error is nil, want blocker")
 	}
 	if _, statErr := os.Stat(filepath.Join(wrapperDir, "old-tool.json")); statErr != nil {
 		t.Fatalf("old wrapper should not be deleted when blocked: %v", statErr)
+	}
+}
+
+func TestUpdateAddsFigmaWrapperWhenOAuthCredentialExists(t *testing.T) {
+	home := t.TempDir()
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cursorPath, []byte(`{
+  "mcpServers": {
+    "figma": {
+      "type": "streamable-http",
+      "url": "https://mcp.figma.com/mcp",
+      "auth": "oauth",
+      "oauth_resource": "https://mcp.figma.com",
+      "scopes": ["tools:read"],
+      "oauth": {
+        "client_id": "figma-client"
+      }
+    }
+  }
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := oauthstore.NewFileStore(home).Save(oauthstore.Credential{
+		Name:        "figma",
+		ServerURL:   "https://mcp.figma.com/mcp",
+		AccessToken: "stored-token",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	plan, err := NewUpdatePlan(Options{Home: home, BinaryPath: "/bin/lazy-mcp-wrapper"})
+	if err != nil {
+		t.Fatalf("NewUpdatePlan() error = %v", err)
+	}
+	if len(plan.Blockers) != 0 {
+		t.Fatalf("blockers = %#v", plan.Blockers)
+	}
+	if len(plan.AddedWrappers) != 1 {
+		t.Fatalf("added wrappers = %#v", plan.AddedWrappers)
+	}
+	cfg := plan.AddedWrappers[0].Content
+	if cfg.Name != "figma" || cfg.Auth != "oauth" || cfg.Sharing != "session" || cfg.LocalPort == 0 {
+		t.Fatalf("figma wrapper config = %#v", cfg)
+	}
+	if cfg.OAuthClientID != "figma-client" || cfg.OAuthResource != "https://mcp.figma.com" {
+		t.Fatalf("figma oauth fields = %#v", cfg)
+	}
+	if len(cfg.OAuthScopes) != 1 || cfg.OAuthScopes[0] != "tools:read" {
+		t.Fatalf("figma oauth scopes = %#v", cfg.OAuthScopes)
 	}
 }

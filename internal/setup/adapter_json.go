@@ -19,13 +19,20 @@ type jsonConfig struct {
 }
 
 type jsonServer struct {
-	Type    string            `json:"type,omitempty"`
-	Auth    string            `json:"auth,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Type          string            `json:"type,omitempty"`
+	Auth          string            `json:"auth,omitempty"`
+	OAuthResource string            `json:"oauth_resource,omitempty"`
+	OAuthScopes   []string          `json:"scopes,omitempty"`
+	OAuth         *jsonOAuthConfig  `json:"oauth,omitempty"`
+	Command       string            `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
+}
+
+type jsonOAuthConfig struct {
+	ClientID string `json:"client_id,omitempty"`
 }
 
 func newJSONAdapter(kind, path string) ClientAdapter {
@@ -50,6 +57,10 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseJSONMCPServers(data)
+}
+
+func parseJSONMCPServers(data []byte) ([]RawServer, error) {
 	var cfg jsonConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
@@ -65,16 +76,23 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 		if err := json.Unmarshal(cfg.MCPServers[name], &server); err != nil {
 			return nil, err
 		}
+		oauthClientID := ""
+		if server.OAuth != nil {
+			oauthClientID = server.OAuth.ClientID
+		}
 		raw := RawServer{
-			Name:    name,
-			Type:    server.Type,
-			Auth:    server.Auth,
-			Command: server.Command,
-			Args:    server.Args,
-			Env:     server.Env,
-			URL:     server.URL,
-			Headers: server.Headers,
-			Raw:     cfg.MCPServers[name],
+			Name:          name,
+			Type:          server.Type,
+			Auth:          server.Auth,
+			OAuthClientID: oauthClientID,
+			OAuthResource: server.OAuthResource,
+			OAuthScopes:   server.OAuthScopes,
+			Command:       server.Command,
+			Args:          server.Args,
+			Env:           server.Env,
+			URL:           server.URL,
+			Headers:       server.Headers,
+			Raw:           cfg.MCPServers[name],
 		}
 		raw.IsWrappable = isWrappable(raw)
 		servers = append(servers, raw)
@@ -114,14 +132,21 @@ func renderJSONConfig(path string, servers []RawServer) ([]byte, error) {
 			mcpServers[server.Name] = server.Raw
 			continue
 		}
+		var oauth *jsonOAuthConfig
+		if server.OAuthClientID != "" {
+			oauth = &jsonOAuthConfig{ClientID: server.OAuthClientID}
+		}
 		data, err := json.Marshal(jsonServer{
-			Type:    defaultType(server.Type),
-			Auth:    server.Auth,
-			Command: server.Command,
-			Args:    server.Args,
-			Env:     server.Env,
-			URL:     server.URL,
-			Headers: server.Headers,
+			Type:          defaultType(server.Type),
+			Auth:          server.Auth,
+			OAuthResource: server.OAuthResource,
+			OAuthScopes:   server.OAuthScopes,
+			OAuth:         oauth,
+			Command:       server.Command,
+			Args:          server.Args,
+			Env:           server.Env,
+			URL:           server.URL,
+			Headers:       server.Headers,
 		})
 		if err != nil {
 			return nil, err
@@ -233,6 +258,9 @@ func isOAuthManagedRemoteMCP(server RawServer) bool {
 	if rawURL == "" {
 		return false
 	}
+	if isChatGPTManagedRemoteMCP(server) {
+		return false
+	}
 	if strings.EqualFold(server.Auth, "oauth") {
 		return true
 	}
@@ -241,6 +269,10 @@ func isOAuthManagedRemoteMCP(server RawServer) bool {
 		return false
 	}
 	return strings.EqualFold(parsed.Hostname(), "mcp.figma.com")
+}
+
+func isChatGPTManagedRemoteMCP(server RawServer) bool {
+	return strings.TrimSpace(server.URL) != "" && strings.EqualFold(server.Auth, "chatgpt")
 }
 
 func isHTTPWrapperRef(server RawServer) bool {

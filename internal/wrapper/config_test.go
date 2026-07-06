@@ -77,6 +77,73 @@ func TestConfigHTTPDefaults(t *testing.T) {
 	}
 }
 
+func TestConfigOAuthDefaultsToSessionAndExpandsFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oauth.json")
+	if err := os.WriteFile(path, []byte(`{
+  "name": "figma",
+  "url": "https://mcp.figma.com/mcp",
+  "auth": "oauth",
+  "oauth_client_id": "${TEST_OAUTH_CLIENT_ID}",
+  "oauth_resource": "${TEST_OAUTH_RESOURCE}",
+  "oauth_scopes": ["${TEST_OAUTH_SCOPE}"]
+}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("TEST_OAUTH_CLIENT_ID", "client-id")
+	t.Setenv("TEST_OAUTH_RESOURCE", "https://mcp.figma.com")
+	t.Setenv("TEST_OAUTH_SCOPE", "tools")
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !cfg.RequiresOAuth() {
+		t.Fatal("RequiresOAuth() = false")
+	}
+	if !cfg.UseSDKHTTPBackend() {
+		t.Fatal("UseSDKHTTPBackend() = false")
+	}
+	if cfg.Sharing != "session" {
+		t.Fatalf("Sharing = %s, want session", cfg.Sharing)
+	}
+	if cfg.OAuthClientID != "client-id" || cfg.OAuthResource != "https://mcp.figma.com" {
+		t.Fatalf("oauth fields = client_id:%q resource:%q", cfg.OAuthClientID, cfg.OAuthResource)
+	}
+	if len(cfg.OAuthScopes) != 1 || cfg.OAuthScopes[0] != "tools" {
+		t.Fatalf("oauth scopes = %#v", cfg.OAuthScopes)
+	}
+}
+
+func TestConfigRejectsOAuthShared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oauth.json")
+	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","auth":"oauth","sharing":"shared"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "session sharing") {
+		t.Fatalf("LoadConfig() error = %v, want session sharing", err)
+	}
+}
+
+func TestConfigRejectsOAuthNativeHTTPBackend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "oauth.json")
+	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","auth":"oauth","http_backend":"native"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "sdk http_backend") {
+		t.Fatalf("LoadConfig() error = %v, want sdk http_backend", err)
+	}
+}
+
+func TestConfigRejectsInvalidAuth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(path, []byte(`{"name":"bad","url":"https://example.test/mcp","auth":"magic"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "auth") {
+		t.Fatalf("LoadConfig() error = %v, want auth error", err)
+	}
+}
+
 func TestConfigRejectsSSEProtocol(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "http.json")
 	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","protocol":"sse"}`), 0644); err != nil {

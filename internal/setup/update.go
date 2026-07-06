@@ -16,6 +16,7 @@ type UpdatePlan struct {
 	Removed          []string
 	AddedWrappers    []WrapperConfigPlan
 	RemovedWrappers  []existingWrapperConfig
+	ClientUpdates    []ClientUpdate
 	DaemonConfig     DaemonConfigPlan
 	Blockers         []string
 }
@@ -54,10 +55,11 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 				}
 				continue
 			}
-			if !server.IsWrappable {
+			if !canWrapServer(opts.Home, server) {
 				continue
 			}
 			server.Name = name
+			server.IsWrappable = true
 			present[strings.ToLower(name)] = true
 			key := strings.ToLower(server.Name)
 			if _, exists := current[key]; !exists {
@@ -68,20 +70,32 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 
 	var plan UpdatePlan
 	plan.ExistingWrappers = existing
+	if opts.BinaryPath == "" {
+		plan.Blockers = append(plan.Blockers, "binary path is required")
+	}
 	currentKeys := make([]string, 0, len(current))
 	for key := range current {
 		currentKeys = append(currentKeys, key)
 	}
 	sort.Strings(currentKeys)
+	usedPorts := existingLocalPorts(existingDaemonConfigPaths(daemonConfigPath(opts.Home)))
 	for _, key := range currentKeys {
 		if _, exists := existingByName[key]; exists {
 			continue
 		}
 		server := current[key]
+		content := buildWrapperConfig(opts.Home, server)
+		if server.URL != "" {
+			port, err := allocateLocalPort(httpPortBase, usedPorts)
+			if err != nil {
+				plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %v", server.Name, err))
+			}
+			content.LocalPort = port
+		}
 		plan.AddedWrappers = append(plan.AddedWrappers, WrapperConfigPlan{
 			Server:     server,
 			ConfigPath: filepath.Join(wrapperDir, safeName(server.Name)+".json"),
-			Content:    buildWrapperConfig(opts.Home, server),
+			Content:    content,
 		})
 	}
 	for _, cfg := range existing {
@@ -116,6 +130,31 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 		return UpdatePlan{}, err
 	}
 	plan.DaemonConfig = daemonPlan
+
+	localPorts := localPortsForUpdate(existing, plan.AddedWrappers)
+	for _, adapter := range scanClients(opts.Home) {
+		servers, err := adapter.ReadServers()
+		if err != nil {
+			return UpdatePlan{}, err
+		}
+		next := replaceWithWrapperRefs(servers, opts.BinaryPath, daemonPlan.SocketPath, localPorts)
+		newContent, err := renderAdapterContent(adapter, next)
+		if err != nil {
+			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s render: %v", adapter.Kind(), err))
+			continue
+		}
+		currentContent, err := os.ReadFile(adapter.ConfigPath())
+		if err == nil && string(currentContent) == string(newContent) {
+			continue
+		}
+		plan.ClientUpdates = append(plan.ClientUpdates, ClientUpdate{
+			Kind:       adapter.Kind(),
+			ConfigPath: adapter.ConfigPath(),
+			BackupPath: backupPath(adapter.ConfigPath(), opts.Now),
+			Servers:    next,
+			NewContent: newContent,
+		})
+	}
 	return plan, nil
 }
 
@@ -132,7 +171,7 @@ func Update(opts Options) error {
 	if len(plan.Blockers) > 0 {
 		return fmt.Errorf("setup update has blockers: %s", strings.Join(plan.Blockers, "; "))
 	}
-	if (len(plan.AddedWrappers) > 0 || len(plan.RemovedWrappers) > 0) && shouldApply(opts, "Step 1/2: Apply wrapper config changes?") {
+	if (len(plan.AddedWrappers) > 0 || len(plan.RemovedWrappers) > 0 || len(plan.ClientUpdates) > 0) && shouldApply(opts, "Step 1/2: Apply wrapper and client config changes?") {
 		if err := writeWrapperConfigs(plan.AddedWrappers); err != nil {
 			return err
 		}
@@ -140,6 +179,9 @@ func Update(opts Options) error {
 			if err := os.Remove(cfg.Path); err != nil && !os.IsNotExist(err) {
 				return err
 			}
+		}
+		if err := writeClientUpdates(opts.Home, plan.ClientUpdates); err != nil {
+			return err
 		}
 	}
 	if shouldApply(opts, "Step 2/2: Update daemon config and reload?") {
@@ -157,4 +199,17 @@ func Update(opts Options) error {
 		}
 	}
 	return nil
+}
+
+func localPortsForUpdate(existing []existingWrapperConfig, added []WrapperConfigPlan) map[string]int {
+	ports := map[string]int{}
+	for _, cfg := range existing {
+		if cfg.Config.LocalPort > 0 {
+			ports[strings.ToLower(canonicalName(cfg.Name))] = cfg.Config.LocalPort
+		}
+	}
+	for name, port := range localPortsByName(added) {
+		ports[name] = port
+	}
+	return ports
 }

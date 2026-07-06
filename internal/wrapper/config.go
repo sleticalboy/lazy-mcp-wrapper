@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/jsonrpc"
@@ -24,6 +25,12 @@ type Config struct {
 	CWD            string            `json:"cwd"`
 	URL            string            `json:"url,omitempty"`
 	Protocol       string            `json:"protocol,omitempty"`
+	HTTPBackend    string            `json:"http_backend,omitempty"`
+	Auth           string            `json:"auth,omitempty"`
+	OAuthClientID  string            `json:"oauth_client_id,omitempty"`
+	OAuthResource  string            `json:"oauth_resource,omitempty"`
+	OAuthScopes    []string          `json:"oauth_scopes,omitempty"`
+	OAuthStoreDir  string            `json:"oauth_store_dir,omitempty"`
 	Headers        map[string]string `json:"headers,omitempty"`
 	LocalPort      int               `json:"local_port,omitempty"`
 	RealProtocol   string            `json:"real_protocol_version"`
@@ -82,6 +89,20 @@ func LoadConfig(path string) (Config, error) {
 	if cfg.Command != "" && cfg.URL != "" {
 		return Config{}, fmt.Errorf("config command and url are mutually exclusive")
 	}
+	if cfg.Auth != "" {
+		cfg.Auth = strings.ToLower(cfg.Auth)
+		switch cfg.Auth {
+		case "none", "oauth":
+		default:
+			return Config{}, fmt.Errorf("config auth must be none or oauth (got %q)", cfg.Auth)
+		}
+	}
+	if cfg.Auth == "oauth" && cfg.URL == "" {
+		return Config{}, fmt.Errorf("config auth oauth requires url")
+	}
+	if cfg.Auth == "oauth" && cfg.HTTPBackend == "native" {
+		return Config{}, fmt.Errorf("config auth oauth requires sdk http_backend")
+	}
 	if cfg.URL != "" {
 		switch cfg.HTTPProtocol() {
 		case "streamable-http":
@@ -90,12 +111,24 @@ func LoadConfig(path string) (Config, error) {
 		default:
 			return Config{}, fmt.Errorf("config protocol must be streamable-http (got %q)", cfg.Protocol)
 		}
+		switch cfg.HTTPBackend {
+		case "", "native", "sdk":
+		default:
+			return Config{}, fmt.Errorf("config http_backend must be native or sdk (got %q)", cfg.HTTPBackend)
+		}
 	}
 	if cfg.Sharing == "" {
-		cfg.Sharing = "shared"
+		if cfg.RequiresOAuth() {
+			cfg.Sharing = "session"
+		} else {
+			cfg.Sharing = "shared"
+		}
 	}
 	if cfg.Sharing != "shared" && cfg.Sharing != "session" {
 		return Config{}, fmt.Errorf("config sharing must be shared or session")
+	}
+	if cfg.RequiresOAuth() && cfg.Sharing != "session" {
+		return Config{}, fmt.Errorf("config auth oauth requires session sharing")
 	}
 	if _, err := cfg.Framing(); err != nil {
 		return Config{}, err
@@ -123,6 +156,12 @@ func (c *Config) expandEnv() {
 	}
 	c.CWD = os.ExpandEnv(c.CWD)
 	c.URL = os.ExpandEnv(c.URL)
+	c.OAuthClientID = os.ExpandEnv(c.OAuthClientID)
+	c.OAuthResource = os.ExpandEnv(c.OAuthResource)
+	c.OAuthStoreDir = os.ExpandEnv(c.OAuthStoreDir)
+	for i := range c.OAuthScopes {
+		c.OAuthScopes[i] = os.ExpandEnv(c.OAuthScopes[i])
+	}
 	c.CacheDir = os.ExpandEnv(c.CacheDir)
 	c.LogFile = os.ExpandEnv(c.LogFile)
 	for key, value := range c.Headers {
@@ -143,4 +182,12 @@ func (c Config) HTTPProtocol() string {
 	default:
 		return c.Protocol
 	}
+}
+
+func (c Config) UseSDKHTTPBackend() bool {
+	return c.HTTPBackend == "sdk" || c.RequiresOAuth()
+}
+
+func (c Config) RequiresOAuth() bool {
+	return strings.EqualFold(c.Auth, "oauth")
 }
