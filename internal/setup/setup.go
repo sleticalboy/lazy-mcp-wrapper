@@ -84,8 +84,8 @@ func NewPlan(opts Options) (Plan, error) {
 	}
 
 	wrappable := map[string]RawServer{}
-	oauthSkipped := map[string]bool{}
-	chatGPTSkipped := map[string]bool{}
+	oauthSkipped := map[string]RawServer{}
+	chatGPTSkipped := map[string]RawServer{}
 	for _, adapter := range scanClients(opts.Home) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
@@ -110,10 +110,11 @@ func NewPlan(opts Options) (Plan, error) {
 				}
 			} else {
 				skippedByName[strings.ToLower(server.Name)] = true
+				key := strings.ToLower(server.Name)
 				if isChatGPTManagedRemoteMCP(server) {
-					chatGPTSkipped[strings.ToLower(server.Name)] = true
+					chatGPTSkipped[key] = server
 				} else if isOAuthManagedRemoteMCP(server) {
-					oauthSkipped[strings.ToLower(server.Name)] = true
+					oauthSkipped[key] = server
 				}
 			}
 		}
@@ -123,9 +124,9 @@ func NewPlan(opts Options) (Plan, error) {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: ChatGPT-auth remote MCP cannot be wrapped; keep it direct in Codex", name))
 		}
 	}
-	for name := range oauthSkipped {
+	for name, server := range oauthSkipped {
 		if _, willWrap := wrappable[name]; !willWrap {
-			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: OAuth credential not found or expired; run lazy-mcp-wrapper auth login %s --url <remote-mcp-url>", name, name))
+			plan.Blockers = append(plan.Blockers, oauthRemoteBlocker(name, server))
 		}
 	}
 
@@ -198,6 +199,16 @@ func NewPlan(opts Options) (Plan, error) {
 	plan.LaunchAgent = defaultLaunchAgentPlan(opts)
 
 	return plan, nil
+}
+
+func oauthRemoteBlocker(name string, server RawServer) string {
+	if isFigmaRemoteMCP(server) && server.OAuthClientID == "" {
+		return fmt.Sprintf("%s: Figma MCP is kept direct; Figma rejects dynamic OAuth client registration, and no oauth.client_id is configured for wrapper-managed login", name)
+	}
+	if server.OAuthClientID != "" {
+		return fmt.Sprintf("%s: OAuth credential not found or expired; run lazy-mcp-wrapper auth login %s --config <client-mcp-config>", name, name)
+	}
+	return fmt.Sprintf("%s: OAuth credential not found or expired; run lazy-mcp-wrapper auth login %s --url <remote-mcp-url>", name, name)
 }
 
 func (p Plan) Apply(opts Options) error {

@@ -271,6 +271,14 @@ func isOAuthManagedRemoteMCP(server RawServer) bool {
 	return strings.EqualFold(parsed.Hostname(), "mcp.figma.com")
 }
 
+func isFigmaRemoteMCP(server RawServer) bool {
+	parsed, err := url.Parse(strings.TrimSpace(server.URL))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "mcp.figma.com")
+}
+
 func isChatGPTManagedRemoteMCP(server RawServer) bool {
 	return strings.TrimSpace(server.URL) != "" && strings.EqualFold(server.Auth, "chatgpt")
 }

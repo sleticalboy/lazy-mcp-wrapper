@@ -187,7 +187,18 @@ PREFIX=/opt/lazy-mcp-wrapper ./scripts/install-local.sh
 | `streamable-http` | 推荐值。MCP 2025-03-26 标准；省略 `protocol` 时默认使用它。 |
 | `sse` | 已废弃的旧版 HTTP+SSE 传输，仅用于兼容旧服务。 |
 
-`setup` 对远程 HTTP MCP 默认采用保守策略：本地 HTTP、显式配置认证 header/token 的远程 HTTP、或显式标记 `auth = "none"` 的远程 HTTP 才会包装。Figma 这类由 Codex 管理 OAuth 的官方远程 MCP 会保持客户端直连，不会改写成本地 proxy。
+`setup` 对远程 HTTP MCP 默认采用保守策略，只包装认证模型明确的服务：
+
+- 本地 HTTP MCP。
+- 显式标记 `auth = "none"` 的公开免认证远程 MCP。
+- 显式配置 `Authorization`、`X-API-Key` 等 credential header 的远程 MCP。
+- 已通过 `lazy-mcp-wrapper auth login <name>` 建立本地有效凭据的标准 OAuth 远程 MCP。
+
+以下远程 MCP 会保持客户端直连：
+
+- 只有 URL 的远程 MCP，因为 `setup` 无法判断它是公开服务、OAuth 服务，还是绑定了某个特定 client。
+- Figma MCP，除非已经配置了 Figma 接受的预注册 OAuth client 和本地有效凭据。实测 `https://mcp.figma.com/mcp` 会拒绝动态 OAuth client registration（HTTP 403），所以默认应保持 Codex 直连。
+- 配置了 `auth = "chatgpt"` 的远程 MCP，因为 Codex 会在请求时附加内部 ChatGPT auth provider header，wrapper 当前不拥有这些 per-session 凭据。
 
 `setup` 包装远程 HTTP MCP 时，会通过共享 daemon 启动本地 HTTP proxy，并把客户端配置改写到类似 `http://127.0.0.1:54300` 的本地地址。端口会从 `54300` 开始自动递增分配，并写入生成的 wrapper config 的 `local_port` 字段。
 
@@ -323,7 +334,7 @@ lazy-mcp-wrapper setup
 lazy-mcp-wrapper setup --yes
 ```
 
-`setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它会包装 stdio MCP 和远程 HTTP MCP，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。远程 HTTP MCP 会通过 daemon 管理的本地 HTTP proxy 端口暴露给客户端。
+`setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它会包装 stdio MCP，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。远程 HTTP MCP 只在认证模型明确时包装：本地 HTTP、显式 credential header、`auth = "none"`、或已有本地 wrapper OAuth 凭据的标准 OAuth 远程 MCP。只有 URL 的远程 MCP、Figma、以及 `auth = "chatgpt"` 的远程 MCP 会保持客户端直连。
 
 daemon 控制命令：
 

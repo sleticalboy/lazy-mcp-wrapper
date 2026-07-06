@@ -167,6 +167,40 @@ func TestPlanSkipsFigmaRemoteMCP(t *testing.T) {
 	}
 	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
 url = "https://mcp.figma.com/mcp"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 0 {
+		t.Fatalf("figma should not be wrapped: %#v", plan.WrapperConfigs)
+	}
+	if len(plan.ClientUpdates) != 0 {
+		t.Fatalf("figma config should be preserved: %#v", plan.ClientUpdates)
+	}
+	blockers := strings.Join(plan.Blockers, "\n")
+	if !strings.Contains(blockers, "Figma MCP is kept direct") || !strings.Contains(blockers, "dynamic OAuth client registration") {
+		t.Fatalf("blockers = %#v, want figma direct blocker", plan.Blockers)
+	}
+	if strings.Contains(blockers, "auth login figma") {
+		t.Fatalf("blockers should not suggest auth login without oauth client id: %#v", plan.Blockers)
+	}
+}
+
+func TestPlanSkipsFigmaRemoteMCPWithOAuthClientID(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
 auth = "oauth"
 oauth_resource = "https://mcp.figma.com"
 scopes = ["tools:read"]
@@ -286,6 +320,9 @@ auth = "oauth"
 	}
 	if len(plan.Blockers) == 0 {
 		t.Fatal("expected blocker when only oauth remote MCP is configured")
+	}
+	if !strings.Contains(strings.Join(plan.Blockers, "\n"), "auth login remote") {
+		t.Fatalf("blockers = %#v, want auth login hint", plan.Blockers)
 	}
 }
 

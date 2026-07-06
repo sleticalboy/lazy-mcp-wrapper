@@ -54,9 +54,16 @@ func serverNames(servers []RawServer) []string {
 }
 
 func commandLine(server RawServer) string {
-	line := strings.TrimSpace(server.Command + " " + strings.Join(server.Args, " "))
-	if len(line) > 40 {
-		return line[:37] + "..."
+	if strings.TrimSpace(server.URL) != "" {
+		return truncateLine(server.URL, 40)
 	}
-	return line
+	line := strings.TrimSpace(server.Command + " " + strings.Join(server.Args, " "))
+	return truncateLine(line, 40)
+}
+
+func truncateLine(line string, maxLen int) string {
+	if len(line) <= maxLen {
+		return line
+	}
+	return line[:maxLen-3] + "..."
 }
