@@ -247,6 +247,65 @@ url = "https://mcp.figma.com/mcp"
 	assertDecision(t, plan, "figma", "skip", "skipped-figma-dynamic-client-rejected")
 }
 
+func TestPlanDoesNotBlockSkippedFigmaWhenWrapperAlreadyManaged(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.context7]
+type = "stdio"
+command = "/bin/lazy-mcp-wrapper"
+args = ["client", "--socket", "`+socketPath(home)+`", "--name", "context7"]
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapperPath := filepath.Join(wrappersDir(home), "context7.json")
+	if err := os.MkdirAll(filepath.Dir(wrapperPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	wrapperContent, err := json.Marshal(buildWrapperConfig(home, RawServer{
+		Name:    "context7",
+		Command: "npx",
+		Args:    []string{"-y", "@upstash/context7-mcp"},
+	}))
+	if err != nil {
+		t.Fatalf("marshal wrapper config: %v", err)
+	}
+	if err := os.WriteFile(wrapperPath, wrapperContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	daemonContent, err := buildDaemonConfigContent(socketPath(home), []string{wrapperPath})
+	if err != nil {
+		t.Fatalf("build daemon config: %v", err)
+	}
+	if err := os.MkdirAll(lazyMCPDir(home), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(daemonConfigPath(home), daemonContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.Blockers) != 0 {
+		t.Fatalf("blockers = %#v, want no blocker for skipped figma when daemon already has managed wrappers", plan.Blockers)
+	}
+	if len(plan.DaemonConfig.ConfigPaths) != 1 || plan.DaemonConfig.ConfigPaths[0] != wrapperPath {
+		t.Fatalf("daemon config paths = %#v, want existing wrapper", plan.DaemonConfig.ConfigPaths)
+	}
+	assertDecision(t, plan, "figma", "skip", "skipped-figma-dynamic-client-rejected")
+}
+
 func TestPlanSkipsFigmaRemoteMCPWithOAuthClientID(t *testing.T) {
 	home := t.TempDir()
 	codexPath := filepath.Join(home, ".codex", "config.toml")

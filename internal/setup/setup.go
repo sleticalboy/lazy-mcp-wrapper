@@ -141,16 +141,7 @@ func NewPlan(opts Options) (Plan, error) {
 			}
 		}
 	}
-	for name := range chatGPTSkipped {
-		if _, willWrap := wrappable[name]; !willWrap {
-			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: ChatGPT-auth remote MCP cannot be wrapped; keep it direct in Codex", name))
-		}
-	}
-	for name, server := range oauthSkipped {
-		if _, willWrap := wrappable[name]; !willWrap {
-			plan.Blockers = append(plan.Blockers, oauthRemoteBlocker(name, server))
-		}
-	}
+	remoteBlockers := remoteSetupBlockers(wrappable, oauthSkipped, chatGPTSkipped)
 
 	names := make([]string, 0, len(wrappable))
 	for name := range wrappable {
@@ -181,7 +172,11 @@ func NewPlan(opts Options) (Plan, error) {
 	daemonConfigPath := daemonConfigPath(opts.Home)
 	mergedConfigPaths := mergeConfigPathsByName(existingDaemonConfigPaths(daemonConfigPath), configPaths(plan.WrapperConfigs), skippedByName)
 	if len(mergedConfigPaths) == 0 {
-		plan.Blockers = append(plan.Blockers, "no wrappable stdio MCP servers found")
+		if len(remoteBlockers) > 0 {
+			plan.Blockers = append(plan.Blockers, remoteBlockers...)
+		} else {
+			plan.Blockers = append(plan.Blockers, "no wrappable MCP servers found")
+		}
 	}
 	daemonData, err := buildDaemonConfigContent(socketPath, mergedConfigPaths)
 	if err != nil {
@@ -221,6 +216,22 @@ func NewPlan(opts Options) (Plan, error) {
 	plan.LaunchAgent = defaultLaunchAgentPlan(opts)
 
 	return plan, nil
+}
+
+func remoteSetupBlockers(wrappable map[string]RawServer, oauthSkipped, chatGPTSkipped map[string]RawServer) []string {
+	var blockers []string
+	for name := range chatGPTSkipped {
+		if _, willWrap := wrappable[name]; !willWrap {
+			blockers = append(blockers, fmt.Sprintf("%s: ChatGPT-auth remote MCP cannot be wrapped; keep it direct in Codex", name))
+		}
+	}
+	for name, server := range oauthSkipped {
+		if _, willWrap := wrappable[name]; !willWrap {
+			blockers = append(blockers, oauthRemoteBlocker(name, server))
+		}
+	}
+	sort.Strings(blockers)
+	return blockers
 }
 
 func serverDecision(adapter ClientAdapter, server RawServer, action, reason, detail string) ServerDecision {
