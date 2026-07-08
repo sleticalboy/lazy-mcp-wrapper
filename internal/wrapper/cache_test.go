@@ -31,3 +31,21 @@ func TestReadWriteCachedToolsList(t *testing.T) {
 		t.Fatalf("result = %s, want %s", msg.Result, result)
 	}
 }
+
+func TestWriteCachedToolsListClearsInvalidationStatus(t *testing.T) {
+	cfg := Config{Name: "fake", Command: "fake-mcp", CacheDir: t.TempDir()}
+	if err := cfg.invalidateCachedToolsList(); err != nil {
+		t.Fatalf("invalidateCachedToolsList() error = %v", err)
+	}
+	info := cfg.CacheInfo()
+	if !info.Invalidated {
+		t.Fatalf("cache should be marked invalidated: %#v", info)
+	}
+	if err := cfg.writeCachedToolsList(json.RawMessage(`{"tools":[]}`)); err != nil {
+		t.Fatalf("writeCachedToolsList() error = %v", err)
+	}
+	info = cfg.CacheInfo()
+	if info.Invalidated || info.InvalidatedAt != nil {
+		t.Fatalf("cache invalidation should be cleared after write: %#v", info)
+	}
+}

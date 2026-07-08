@@ -136,10 +136,12 @@ The `protocol` field accepts:
 - `real_framing` controls how the wrapper talks to the real MCP server:
   - `header` uses MCP `Content-Length` framing and is the default.
   - `jsonl` uses one JSON-RPC message per line. Context7 v3.2.2, Playwright MCP 1.62.0-alpha, and MasterGo Magic MCP currently use this mode.
-- `tools/list` is cached by default. Cache files are stored under the OS user cache directory unless `cache_dir` is set. Set `disable_cache` to `true` to always query the real MCP server.
+- `tools/list` is cached by default. Cache files are stored under the OS user cache directory unless `cache_dir` is set. `notifications/tools/list_changed` invalidates the cache before the notification is forwarded. Set `disable_cache` to `true` to always query the real MCP server.
 - `sharing` controls daemon sharing strategy. `shared` reuses one proxy per MCP name. `session` creates one proxy per client connection for stateful MCPs.
 
 ## Cache and Inspect
+
+`resources/*` and `prompts/*` are forwarded live by default; only `tools/list` is cached.
 
 Refresh cache without starting a Codex session:
 

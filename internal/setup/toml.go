@@ -117,6 +117,11 @@ func parseTOMLMCPServers(data []byte) ([]RawServer, error) {
 	flushRaw()
 	for _, name := range order {
 		server := *serversByName[name]
+		var err error
+		server, err = resolveServerPlaceholders(server)
+		if err != nil {
+			return nil, err
+		}
 		server.IsWrappable = isWrappable(server)
 		servers = append(servers, server)
 	}
@@ -161,7 +166,7 @@ func renderTOMLMCPServers(servers []RawServer) []string {
 		if i > 0 {
 			lines = append(lines, "")
 		}
-		if !server.IsWrappable && len(server.Raw) > 0 {
+		if !server.IsWrappable && !server.Rewritten && len(server.Raw) > 0 {
 			lines = append(lines, strings.Split(strings.TrimRight(string(server.Raw), "\n"), "\n")...)
 			continue
 		}

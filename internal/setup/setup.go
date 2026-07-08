@@ -459,7 +459,7 @@ func replaceWithWrapperRefs(servers []RawServer, binaryPath, socketPath string, 
 				next.Args = []string{"client", "--socket", socketPath, "--name", next.Name}
 				next.Env = nil
 			}
-			next.Raw = nil
+			next.Rewritten = true
 			next.Env = nil
 			next.IsWrappable = false
 		}

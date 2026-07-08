@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/jsonrpc"
@@ -19,11 +20,13 @@ import (
 const cacheVersion = 1
 
 type CacheInfo struct {
-	Enabled bool   `json:"enabled"`
-	Dir     string `json:"dir"`
-	File    string `json:"file"`
-	Key     string `json:"key"`
-	Exists  bool   `json:"exists"`
+	Enabled       bool       `json:"enabled"`
+	Dir           string     `json:"dir"`
+	File          string     `json:"file"`
+	Key           string     `json:"key"`
+	Exists        bool       `json:"exists"`
+	Invalidated   bool       `json:"invalidated,omitempty"`
+	InvalidatedAt *time.Time `json:"invalidated_at,omitempty"`
 }
 
 func (c Config) ClearCache() (CacheInfo, error) {
@@ -34,7 +37,12 @@ func (c Config) ClearCache() (CacheInfo, error) {
 	if err := os.Remove(info.File); err != nil && !os.IsNotExist(err) {
 		return info, err
 	}
+	if err := os.Remove(cacheInvalidationFile(info)); err != nil && !os.IsNotExist(err) {
+		return info, err
+	}
 	info.Exists = false
+	info.Invalidated = false
+	info.InvalidatedAt = nil
 	return info, nil
 }
 
@@ -59,6 +67,10 @@ func (c Config) CacheInfo() CacheInfo {
 	info.File = filepath.Join(info.Dir, c.Name+"-"+info.Key+".json")
 	_, err := os.Stat(info.File)
 	info.Exists = err == nil
+	if invalidatedAt, ok := readCacheInvalidation(cacheInvalidationFile(info)); ok {
+		info.Invalidated = true
+		info.InvalidatedAt = &invalidatedAt
+	}
 	return info
 }
 
@@ -101,7 +113,44 @@ func (c Config) writeCachedToolsList(result json.RawMessage) error {
 	if err != nil {
 		return err
 	}
+	_ = os.Remove(cacheInvalidationFile(info))
 	return os.WriteFile(info.File, append(data, '\n'), 0644)
+}
+
+func (c Config) invalidateCachedToolsList() error {
+	info := c.CacheInfo()
+	if !info.Enabled {
+		return nil
+	}
+	if err := os.MkdirAll(info.Dir, 0755); err != nil {
+		return err
+	}
+	if err := os.Remove(info.File); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(cacheInvalidationFile(info), []byte(time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0644)
+}
+
+func cacheInvalidationFile(info CacheInfo) string {
+	if info.File == "" {
+		return ""
+	}
+	return info.File + ".invalidated"
+}
+
+func readCacheInvalidation(path string) (time.Time, bool) {
+	if path == "" {
+		return time.Time{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(data)))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 func (c Config) cacheKey() string {

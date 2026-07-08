@@ -69,6 +69,49 @@ func TestProxyToolsListUsesCache(t *testing.T) {
 	}
 }
 
+func TestProxyToolsListChangedNotificationInvalidatesCache(t *testing.T) {
+	dir := t.TempDir()
+	fakePath := filepath.Join(dir, "fake-mcp")
+	buildFakeMCP(t, fakePath)
+
+	cfg := Config{
+		Name:           "fake",
+		Command:        fakePath,
+		Args:           []string{"--notify-tools-changed"},
+		CacheDir:       t.TempDir(),
+		IdleTimeout:    Duration{Duration: time.Second},
+		StartupTimeout: Duration{Duration: 5 * time.Second},
+		CallTimeout:    Duration{Duration: 5 * time.Second},
+	}
+
+	proxy := NewProxyWithOptions(cfg, log.New(testWriter{t: t}, "", 0), ProxyOptions{KeepRealOnClientClose: false})
+	session := startProxySession(t, proxy)
+	defer session.closeInput()
+
+	session.writeRequest(1, "initialize", map[string]any{})
+	readResponse(t, session.reader, "initialize")
+	session.writeRequest(2, "tools/list", map[string]any{})
+	readResponse(t, session.reader, "tools/list")
+	if _, err := os.Stat(cfg.CacheInfo().File); err != nil {
+		t.Fatalf("expected cache file before notification: %v", err)
+	}
+
+	notif := readMessage(t, session.reader, "tools/list_changed notification")
+	if notif.Method != "notifications/tools/list_changed" {
+		t.Fatalf("notification method = %q", notif.Method)
+	}
+	if _, err := os.Stat(cfg.CacheInfo().File); !os.IsNotExist(err) {
+		t.Fatalf("cache file should be removed after notification, stat err=%v", err)
+	}
+	info := cfg.CacheInfo()
+	if !info.Invalidated || info.InvalidatedAt == nil {
+		t.Fatalf("cache invalidation status missing: %#v", info)
+	}
+
+	session.closeInput()
+	session.wait()
+}
+
 func TestClearCache(t *testing.T) {
 	cfg := Config{Name: "fake", Command: "fake-mcp", CacheDir: t.TempDir()}
 	if err := cfg.writeCachedToolsList(json.RawMessage(`{"tools":[]}`)); err != nil {

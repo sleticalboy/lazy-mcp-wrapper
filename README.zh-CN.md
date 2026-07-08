@@ -357,7 +357,9 @@ lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 
 ## 缓存
 
-`tools/list` 默认启用缓存。缓存位置默认在系统用户缓存目录下，也可以通过 `cache_dir` 指定。
+`tools/list` 默认启用缓存。缓存位置默认在系统用户缓存目录下，也可以通过 `cache_dir` 指定。收到 `notifications/tools/list_changed` 时，wrapper 会先失效对应缓存，再把通知转发给客户端。
+
+`resources/*` 和 `prompts/*` 默认实时转发；当前只有 `tools/list` 会缓存。
 
 查看配置和缓存状态：
 

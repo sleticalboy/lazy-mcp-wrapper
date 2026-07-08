@@ -199,11 +199,23 @@ func (p *Proxy) notifForwarder(writer *lockedWriter, updates <-chan chan jsonrpc
 				current = nil
 				continue
 			}
+			p.handleServerNotification(msg)
 			if err := writer.Write(msg); err != nil {
 				p.log.Printf("forward server notification failed method=%s error=%v", msg.Method, err)
 			}
 		}
 	}
+}
+
+func (p *Proxy) handleServerNotification(msg jsonrpc.Message) {
+	if msg.Method != "notifications/tools/list_changed" {
+		return
+	}
+	if err := p.cfg.invalidateCachedToolsList(); err != nil {
+		p.log.Printf("tools/list cache invalidation failed name=%s error=%v", p.cfg.Name, err)
+		return
+	}
+	p.log.Printf("tools/list cache invalidated name=%s reason=server_notification", p.cfg.Name)
 }
 
 func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message, onRealClient func(realBackend), afterWrite *func()) jsonrpc.Message {

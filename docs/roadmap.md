@@ -45,6 +45,19 @@
 
 ---
 
+## 方向六：MCP Hub 借鉴与本地产品增强
+
+**目标**：吸收 MCP Hub 的配置兼容、诊断和生命周期管理经验，但保持 lazy proxy、per-server 边界和 session 隔离。详见 [mcp-hub-learnings-plan.md](mcp-hub-learnings-plan.md)。
+
+- [ ] **1. Client config compatibility**：支持 `servers`/`mcpServers` 双格式、JSON-with-comments（如可安全 round-trip）、多配置输入和常见 `${}` 占位符解析；默认不执行 `${cmd: ...}`
+- [ ] **2. Cache invalidation**：收到 `notifications/tools/list_changed` 时清理对应 `tools/list` cache，并明确 resources/prompts 暂不默认缓存
+- [ ] **3. Structured setup diagnostics**：为 wrap/skip/direct 决策增加结构化 reason code，让 `setup --dry-run` 明确解释 Figma、ChatGPT-auth、URL-only remote、node_repl、Playwright 等情况
+- [ ] **4. Lower-impact daemon reload**：reload 时保留未变化的 proxy 和运行统计，只替换新增、移除或配置变化的 server，同时保持现有 busy/graceful/force 语义
+
+不做：默认单 `/mcp` 聚合入口、默认工具命名空间化、daemon 启动时拉起所有 enabled MCP、全局共享有状态 MCP。
+
+---
+
 ## 方向四：Windows 支持
 
 **目标**：覆盖 Windows 开发者，扩大用户群。详见 [plan-windows.md](plan-windows.md)。

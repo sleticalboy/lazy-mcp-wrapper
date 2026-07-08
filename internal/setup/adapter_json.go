@@ -2,6 +2,7 @@ package setup
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ type jsonAdapter struct {
 
 type jsonConfig struct {
 	MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	Servers    map[string]json.RawMessage `json:"servers"`
 }
 
 type jsonServer struct {
@@ -61,19 +63,19 @@ func (a jsonAdapter) ReadServers() ([]RawServer, error) {
 }
 
 func parseJSONMCPServers(data []byte) ([]RawServer, error) {
-	var cfg jsonConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	_, mcpServers, err := jsonServerSection(data)
+	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(cfg.MCPServers))
-	for name := range cfg.MCPServers {
+	names := make([]string, 0, len(mcpServers))
+	for name := range mcpServers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	servers := make([]RawServer, 0, len(names))
 	for _, name := range names {
 		var server jsonServer
-		if err := json.Unmarshal(cfg.MCPServers[name], &server); err != nil {
+		if err := json.Unmarshal(mcpServers[name], &server); err != nil {
 			return nil, err
 		}
 		oauthClientID := ""
@@ -92,7 +94,11 @@ func parseJSONMCPServers(data []byte) ([]RawServer, error) {
 			Env:           server.Env,
 			URL:           server.URL,
 			Headers:       server.Headers,
-			Raw:           cfg.MCPServers[name],
+			Raw:           mcpServers[name],
+		}
+		raw, err = resolveServerPlaceholders(raw)
+		if err != nil {
+			return nil, err
 		}
 		raw.IsWrappable = isWrappable(raw)
 		servers = append(servers, raw)
@@ -122,32 +128,31 @@ func renderJSONConfig(path string, servers []RawServer) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	isJSONC, err := jsonNeedsNormalization(data)
+	if err != nil {
+		return nil, err
+	}
+	if isJSONC {
+		if hasRewrittenServers(servers) {
+			return nil, fmt.Errorf("JSON-with-comments config cannot be rewritten safely; convert %s to standard JSON or remove comments/trailing commas before running setup", path)
+		}
+		return data, nil
+	}
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, err
 	}
+	serverKey, _, err := jsonServerSection(data)
+	if err != nil {
+		return nil, err
+	}
 	mcpServers := map[string]json.RawMessage{}
 	for _, server := range servers {
-		if !server.IsWrappable && len(server.Raw) > 0 {
+		if !server.IsWrappable && !server.Rewritten && len(server.Raw) > 0 {
 			mcpServers[server.Name] = server.Raw
 			continue
 		}
-		var oauth *jsonOAuthConfig
-		if server.OAuthClientID != "" {
-			oauth = &jsonOAuthConfig{ClientID: server.OAuthClientID}
-		}
-		data, err := json.Marshal(jsonServer{
-			Type:          defaultType(server.Type),
-			Auth:          server.Auth,
-			OAuthResource: server.OAuthResource,
-			OAuthScopes:   server.OAuthScopes,
-			OAuth:         oauth,
-			Command:       server.Command,
-			Args:          server.Args,
-			Env:           server.Env,
-			URL:           server.URL,
-			Headers:       server.Headers,
-		})
+		data, err := renderJSONServer(server)
 		if err != nil {
 			return nil, err
 		}
@@ -157,12 +162,232 @@ func renderJSONConfig(path string, servers []RawServer) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	doc["mcpServers"] = encodedServers
+	doc[serverKey] = encodedServers
+	if serverKey == "mcpServers" {
+		delete(doc, "servers")
+	} else {
+		delete(doc, "mcpServers")
+	}
 	data, err = json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func jsonServerSection(data []byte) (string, map[string]json.RawMessage, error) {
+	var cfg jsonConfig
+	if _, err := unmarshalJSONConfig(data, &cfg); err != nil {
+		return "", nil, err
+	}
+	if len(cfg.MCPServers) > 0 || cfg.Servers == nil {
+		if cfg.MCPServers == nil {
+			cfg.MCPServers = map[string]json.RawMessage{}
+		}
+		return "mcpServers", cfg.MCPServers, nil
+	}
+	return "servers", cfg.Servers, nil
+}
+
+func unmarshalJSONConfig(data []byte, target any) (bool, error) {
+	if err := json.Unmarshal(data, target); err == nil {
+		return false, nil
+	}
+	normalized, err := normalizeJSONC(data)
+	if err != nil {
+		return false, err
+	}
+	if err := json.Unmarshal(normalized, target); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func jsonNeedsNormalization(data []byte) (bool, error) {
+	var doc any
+	return unmarshalJSONConfig(data, &doc)
+}
+
+func hasRewrittenServers(servers []RawServer) bool {
+	for _, server := range servers {
+		if server.Rewritten || server.IsWrappable {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeJSONC(data []byte) ([]byte, error) {
+	withoutComments, err := stripJSONComments(data)
+	if err != nil {
+		return nil, err
+	}
+	return stripJSONTrailingCommas(withoutComments), nil
+}
+
+func stripJSONComments(data []byte) ([]byte, error) {
+	out := make([]byte, 0, len(data))
+	inString := false
+	escaped := false
+	for i := 0; i < len(data); i++ {
+		ch := data[i]
+		if inString {
+			out = append(out, ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			out = append(out, ch)
+			continue
+		}
+		if ch == '/' && i+1 < len(data) {
+			next := data[i+1]
+			switch next {
+			case '/':
+				i += 2
+				for i < len(data) && data[i] != '\n' && data[i] != '\r' {
+					i++
+				}
+				if i < len(data) {
+					out = append(out, data[i])
+				}
+				continue
+			case '*':
+				i += 2
+				closed := false
+				for i+1 < len(data) {
+					if data[i] == '*' && data[i+1] == '/' {
+						closed = true
+						i++
+						break
+					}
+					if data[i] == '\n' || data[i] == '\r' {
+						out = append(out, data[i])
+					}
+					i++
+				}
+				if !closed {
+					return nil, fmt.Errorf("unterminated JSON block comment")
+				}
+				continue
+			}
+		}
+		out = append(out, ch)
+	}
+	if inString {
+		return nil, fmt.Errorf("unterminated JSON string")
+	}
+	return out, nil
+}
+
+func stripJSONTrailingCommas(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	inString := false
+	escaped := false
+	for i := 0; i < len(data); i++ {
+		ch := data[i]
+		if inString {
+			out = append(out, ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			out = append(out, ch)
+			continue
+		}
+		if ch == ',' {
+			j := i + 1
+			for j < len(data) && isJSONWhitespace(data[j]) {
+				j++
+			}
+			if j < len(data) && (data[j] == '}' || data[j] == ']') {
+				continue
+			}
+		}
+		out = append(out, ch)
+	}
+	return out
+}
+
+func isJSONWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+}
+
+func renderJSONServer(server RawServer) ([]byte, error) {
+	doc := map[string]json.RawMessage{}
+	if len(server.Raw) > 0 {
+		if err := json.Unmarshal(server.Raw, &doc); err != nil {
+			return nil, err
+		}
+	}
+	setJSONField(doc, "type", defaultType(server.Type))
+	setJSONField(doc, "auth", server.Auth)
+	setJSONField(doc, "oauth_resource", server.OAuthResource)
+	if len(server.OAuthScopes) > 0 {
+		setJSONField(doc, "scopes", server.OAuthScopes)
+	} else {
+		delete(doc, "scopes")
+	}
+	if server.OAuthClientID != "" {
+		setJSONField(doc, "oauth", jsonOAuthConfig{ClientID: server.OAuthClientID})
+	} else {
+		delete(doc, "oauth")
+	}
+	setJSONField(doc, "command", server.Command)
+	if len(server.Args) > 0 {
+		setJSONField(doc, "args", server.Args)
+	} else {
+		delete(doc, "args")
+	}
+	if len(server.Env) > 0 {
+		setJSONField(doc, "env", server.Env)
+	} else {
+		delete(doc, "env")
+	}
+	setJSONField(doc, "url", server.URL)
+	if len(server.Headers) > 0 {
+		setJSONField(doc, "headers", server.Headers)
+	} else {
+		delete(doc, "headers")
+	}
+	return json.Marshal(doc)
+}
+
+func setJSONField(doc map[string]json.RawMessage, name string, value any) {
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			delete(doc, name)
+			return
+		}
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	doc[name] = data
 }
 
 func renderAdapterContent(adapter ClientAdapter, servers []RawServer) ([]byte, error) {

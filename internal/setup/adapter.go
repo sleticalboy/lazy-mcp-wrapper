@@ -15,6 +15,7 @@ type RawServer struct {
 	URL           string            `json:"url,omitempty"`
 	Headers       map[string]string `json:"headers,omitempty"`
 	Raw           json.RawMessage   `json:"-"`
+	Rewritten     bool              `json:"-"`
 	IsWrappable   bool              `json:"is_wrappable"`
 }
 
