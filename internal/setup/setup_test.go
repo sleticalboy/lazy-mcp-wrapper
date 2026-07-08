@@ -101,6 +101,54 @@ url = "https://example.test/mcp"
 	}
 }
 
+func TestPlanExplicitConfigPathsPreferLaterServerByName(t *testing.T) {
+	home := t.TempDir()
+	firstPath := filepath.Join(home, "first.toml")
+	secondPath := filepath.Join(home, "second.toml")
+	if err := os.WriteFile(firstPath, []byte(`[mcp_servers.tool]
+command = "npx"
+args = ["old-package"]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte(`[mcp_servers.tool]
+command = "npx"
+args = ["new-package"]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:        home,
+		BinaryPath:  "/bin/lazy-mcp-wrapper",
+		ConfigPaths: []string{firstPath, secondPath},
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.Blockers) != 0 {
+		t.Fatalf("blockers = %#v", plan.Blockers)
+	}
+	if len(plan.DetectedClients) != 2 {
+		t.Fatalf("detected clients = %#v", plan.DetectedClients)
+	}
+	if len(plan.WrapperConfigs) != 1 {
+		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
+	}
+	if got := strings.Join(plan.WrapperConfigs[0].Content.Args, " "); got != "new-package" {
+		t.Fatalf("wrapper args = %q, want later config args", got)
+	}
+	if len(plan.ClientUpdates) != 2 {
+		t.Fatalf("client updates = %#v", plan.ClientUpdates)
+	}
+	for _, update := range plan.ClientUpdates {
+		content := string(update.NewContent)
+		if !strings.Contains(content, `command = "/bin/lazy-mcp-wrapper"`) || !strings.Contains(content, `--name`) {
+			t.Fatalf("client update for %s missing wrapper ref:\n%s", update.ConfigPath, content)
+		}
+	}
+}
+
 func TestPlanSkipsURLOnlyRemoteMCPByDefault(t *testing.T) {
 	home := t.TempDir()
 	codexPath := filepath.Join(home, ".codex", "config.toml")

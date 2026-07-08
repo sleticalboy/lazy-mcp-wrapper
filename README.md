@@ -189,6 +189,12 @@ lazy-mcp-wrapper setup
 lazy-mcp-wrapper setup --yes
 ```
 
+To scan explicit client config files instead of known client locations, pass `--config PATH`. The flag can be repeated; later files override earlier files by MCP server name:
+
+```bash
+lazy-mcp-wrapper setup --config ./base-mcp.json --config ./local-mcp.toml --dry-run
+```
+
 Supported clients:
 
 - Codex: `~/.codex/config.toml`

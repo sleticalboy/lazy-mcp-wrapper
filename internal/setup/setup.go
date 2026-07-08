@@ -23,12 +23,13 @@ const (
 )
 
 type Options struct {
-	Home       string
-	BinaryPath string
-	YesAll     bool
-	DryRun     bool
-	Now        time.Time
-	Exec       execFunc
+	Home        string
+	BinaryPath  string
+	ConfigPaths []string
+	YesAll      bool
+	DryRun      bool
+	Now         time.Time
+	Exec        execFunc
 }
 
 type Plan struct {
@@ -96,7 +97,8 @@ func NewPlan(opts Options) (Plan, error) {
 	wrappable := map[string]RawServer{}
 	oauthSkipped := map[string]RawServer{}
 	chatGPTSkipped := map[string]RawServer{}
-	for _, adapter := range scanClients(opts.Home) {
+	explicitConfigs := len(opts.ConfigPaths) > 0
+	for _, adapter := range scanClients(opts.Home, opts.ConfigPaths) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("%s: %v", adapter.Kind(), err))
@@ -109,6 +111,13 @@ func NewPlan(opts Options) (Plan, error) {
 			if server.Name == "" {
 				continue
 			}
+			key := strings.ToLower(server.Name)
+			if explicitConfigs {
+				delete(wrappable, key)
+				delete(oauthSkipped, key)
+				delete(chatGPTSkipped, key)
+				delete(skippedByName, key)
+			}
 			if isWrapperRef(server, socketPath) || isHTTPWrapperRef(server) {
 				plan.Decisions = append(plan.Decisions, serverDecision(adapter, server, "skip", "skipped-existing-wrapper", "already points to lazy-mcp-wrapper"))
 				continue
@@ -116,14 +125,14 @@ func NewPlan(opts Options) (Plan, error) {
 			if canWrapServer(opts.Home, server) {
 				server.IsWrappable = true
 				plan.Decisions = append(plan.Decisions, serverDecision(adapter, server, "wrap", wrappedReason(server), "will be managed by lazy-mcp-wrapper"))
-				key := strings.ToLower(server.Name)
-				if _, exists := wrappable[key]; !exists {
+				if explicitConfigs {
+					wrappable[key] = server
+				} else if _, exists := wrappable[key]; !exists {
 					wrappable[key] = server
 				}
 			} else {
-				skippedByName[strings.ToLower(server.Name)] = true
+				skippedByName[key] = true
 				plan.Decisions = append(plan.Decisions, serverDecision(adapter, server, "skip", skippedReason(server), skippedDetail(server)))
-				key := strings.ToLower(server.Name)
 				if isChatGPTManagedRemoteMCP(server) {
 					chatGPTSkipped[key] = server
 				} else if isOAuthManagedRemoteMCP(server) {
@@ -185,7 +194,7 @@ func NewPlan(opts Options) (Plan, error) {
 		Content:     daemonData,
 	}
 
-	for _, adapter := range scanClients(opts.Home) {
+	for _, adapter := range scanClients(opts.Home, opts.ConfigPaths) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
 			continue
@@ -310,25 +319,25 @@ func (p Plan) Apply(opts Options) error {
 		}
 	}
 	if len(p.ClientUpdates) > 0 && shouldApply(opts, "Step 3/3: Update client configs with backups?") {
-		if err := writeClientUpdates(opts.Home, p.ClientUpdates); err != nil {
+		if err := writeClientUpdates(opts.Home, opts.ConfigPaths, p.ClientUpdates); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeClientUpdates(home string, updates []ClientUpdate) error {
-	adaptersByKind := map[string]ClientAdapter{}
-	for _, adapter := range scanClients(home) {
-		adaptersByKind[adapter.Kind()] = adapter
+func writeClientUpdates(home string, configPaths []string, updates []ClientUpdate) error {
+	adaptersByPath := map[string]ClientAdapter{}
+	for _, adapter := range scanClients(home, configPaths) {
+		adaptersByPath[adapter.ConfigPath()] = adapter
 	}
 	for _, update := range updates {
 		if err := os.MkdirAll(filepath.Dir(update.BackupPath), 0755); err != nil {
 			return err
 		}
-		adapter := adaptersByKind[update.Kind]
+		adapter := adaptersByPath[update.ConfigPath]
 		if adapter == nil {
-			return fmt.Errorf("adapter not found for %s", update.Kind)
+			return fmt.Errorf("adapter not found for %s", update.ConfigPath)
 		}
 		if err := adapter.WriteServers(update.Servers, update.BackupPath); err != nil {
 			return err

@@ -720,6 +720,8 @@ func runSetup(args []string) {
 	dryRun := fs.Bool("dry-run", false, "print setup plan without applying")
 	home := fs.String("home", "", "home directory to scan; defaults to current user home")
 	binaryPath := fs.String("bin", "", "lazy-mcp-wrapper binary path; defaults to current executable")
+	configPaths := multiFlag{}
+	fs.Var(&configPaths, "config", "client MCP config to scan; can be repeated and later entries override earlier entries by server name")
 	_ = fs.Parse(args)
 	subcmd := ""
 	subcmdArgs := fs.Args()
@@ -733,6 +735,7 @@ func runSetup(args []string) {
 		subFS.BoolVar(dryRun, "dry-run", *dryRun, "print setup plan without applying")
 		subFS.StringVar(home, "home", *home, "home directory to scan; defaults to current user home")
 		subFS.StringVar(binaryPath, "bin", *binaryPath, "lazy-mcp-wrapper binary path; defaults to current executable")
+		subFS.Var(&configPaths, "config", "client MCP config to scan; can be repeated and later entries override earlier entries by server name")
 		_ = subFS.Parse(subcmdArgs)
 	}
 
@@ -743,10 +746,11 @@ func runSetup(args []string) {
 		}
 	}
 	opts := setup.Options{
-		Home:       *home,
-		BinaryPath: bin,
-		YesAll:     *yes,
-		DryRun:     *dryRun,
+		Home:        *home,
+		BinaryPath:  bin,
+		ConfigPaths: []string(configPaths),
+		YesAll:      *yes,
+		DryRun:      *dryRun,
 	}
 	switch subcmd {
 	case "status":

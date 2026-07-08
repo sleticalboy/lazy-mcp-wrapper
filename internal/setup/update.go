@@ -36,7 +36,7 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 	current := map[string]RawServer{}
 	present := map[string]bool{}
 	socketPath := currentDaemonSocket(opts.Home)
-	for _, adapter := range scanClients(opts.Home) {
+	for _, adapter := range scanClients(opts.Home, nil) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
 			return UpdatePlan{}, err
@@ -132,7 +132,7 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 	plan.DaemonConfig = daemonPlan
 
 	localPorts := localPortsForUpdate(existing, plan.AddedWrappers)
-	for _, adapter := range scanClients(opts.Home) {
+	for _, adapter := range scanClients(opts.Home, nil) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
 			return UpdatePlan{}, err
@@ -180,7 +180,7 @@ func Update(opts Options) error {
 				return err
 			}
 		}
-		if err := writeClientUpdates(opts.Home, plan.ClientUpdates); err != nil {
+		if err := writeClientUpdates(opts.Home, nil, plan.ClientUpdates); err != nil {
 			return err
 		}
 	}

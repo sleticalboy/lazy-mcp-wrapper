@@ -63,6 +63,27 @@ func readServersFromPath(path string) ([]RawServer, error) {
 	}
 }
 
+func renderServersForPath(path string, servers []RawServer) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".toml":
+		return replaceTOMLMCPServers(data, servers), nil
+	case ".json":
+		return renderJSONConfig(path, servers)
+	default:
+		if _, err := parseTOMLMCPServers(data); err == nil {
+			return replaceTOMLMCPServers(data, servers), nil
+		}
+		if _, err := parseJSONMCPServers(data); err == nil {
+			return renderJSONConfig(path, servers)
+		}
+		return nil, fmt.Errorf("unsupported client config format: %s", path)
+	}
+}
+
 func findRawServer(servers []RawServer, name string) (RawServer, bool) {
 	want := canonicalName(name)
 	for _, server := range servers {

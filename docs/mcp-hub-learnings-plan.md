@@ -26,14 +26,14 @@
 
 目标：让 `setup` 能理解更多真实世界里的 MCP 配置文件，同时不改变 wrapper 运行时模型。
 
-当前状态：进行中。已完成 `mcpServers` / `servers` 双 key 读取与按原 key 写回；JSON 写回 wrapper ref 时会保留原 server 上未知字段；读取支持 JSON-with-comments 和 trailing comma，存在改写需求时会明确报错而不是静默丢注释；已支持安全占位符解析并拒绝 `${cmd: ...}`。
+当前状态：已完成推荐范围。已完成 `mcpServers` / `servers` 双 key 读取与按原 key 写回；JSON 写回 wrapper ref 时会保留原 server 上未知字段；读取支持 JSON-with-comments 和 trailing comma，存在改写需求时会明确报错而不是静默丢注释；已支持安全占位符解析并拒绝 `${cmd: ...}`；`setup --config` 可重复传入，后者按 server 名覆盖前者。
 
 范围：
 
 - JSON client config 同时接受 `mcpServers` 和 VS Code 风格的 `servers` key。（已完成）
 - 写回 JSON config 时保留未知的 top-level 字段和 per-server 字段。（已完成）
 - 在安全可 round-trip 的前提下支持 JSON-with-comments，包括注释和 trailing comma。（读取已完成；改写时先阻断）
-- 在显式命令里支持多个 config 输入，按后者覆盖前者的规则 merge。
+- 在显式命令里支持多个 config 输入，按后者覆盖前者的规则 merge。（已完成）
 - 解析扫描配置里的常见占位符：
   - `${env:VAR}`（已完成）
   - `${VAR}`（已完成）
@@ -49,7 +49,7 @@
 验收：
 
 - 现有 JSON config 测试继续通过。
-- 新增测试覆盖 `servers`、`mcpServers`、JSON-with-comments（如支持）、未知字段保留和占位符解析。
+- 新增测试覆盖 `servers`、`mcpServers`、JSON-with-comments（如支持）、未知字段保留、占位符解析和多个显式 config 后者覆盖前者。
 - `setup --dry-run` 遇到无法解析的占位符时给出明确提示，而不是静默生成坏的 wrapper config。
 
 ### 2. Cache Invalidation and Cache Boundaries

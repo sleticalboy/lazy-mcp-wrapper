@@ -391,16 +391,7 @@ func setJSONField(doc map[string]json.RawMessage, name string, value any) {
 }
 
 func renderAdapterContent(adapter ClientAdapter, servers []RawServer) ([]byte, error) {
-	switch adapter.Kind() {
-	case "codex":
-		data, err := os.ReadFile(adapter.ConfigPath())
-		if err != nil {
-			return nil, err
-		}
-		return replaceTOMLMCPServers(data, servers), nil
-	default:
-		return renderJSONConfig(adapter.ConfigPath(), servers)
-	}
+	return renderServersForPath(adapter.ConfigPath(), servers)
 }
 
 func defaultType(value string) string {

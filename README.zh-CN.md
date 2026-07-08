@@ -334,6 +334,12 @@ lazy-mcp-wrapper setup
 lazy-mcp-wrapper setup --yes
 ```
 
+如果只想扫描指定 client config，可以传 `--config PATH`；该参数可重复，后面的文件会按 MCP server 名覆盖前面的同名配置：
+
+```bash
+lazy-mcp-wrapper setup --config ./base-mcp.json --config ./local-mcp.toml --dry-run
+```
+
 `setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它会包装 stdio MCP，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。远程 HTTP MCP 只在认证模型明确时包装：本地 HTTP、显式 credential header、`auth = "none"`、或已有本地 wrapper OAuth 凭据的标准 OAuth 远程 MCP。只有 URL 的远程 MCP、Figma、以及 `auth = "chatgpt"` 的远程 MCP 会保持客户端直连。
 
 daemon 控制命令：

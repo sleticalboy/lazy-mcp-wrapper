@@ -30,7 +30,7 @@ func NewUninstallPlan(opts Options) (UninstallPlan, error) {
 		LaunchAgent: defaultLaunchAgentPlan(opts),
 		WrapperDir:  wrappersDir(opts.Home),
 	}
-	for _, adapter := range scanClients(opts.Home) {
+	for _, adapter := range scanClients(opts.Home, nil) {
 		restore := ClientRestorePlan{
 			Kind:       adapter.Kind(),
 			ConfigPath: adapter.ConfigPath(),
@@ -74,7 +74,7 @@ func Uninstall(opts Options) error {
 	}
 	if len(plan.ClientRestores) > 0 && shouldApply(opts, "Step 2/3: Restore client configs?") {
 		adaptersByKind := map[string]ClientAdapter{}
-		for _, adapter := range scanClients(opts.Home) {
+		for _, adapter := range scanClients(opts.Home, nil) {
 			adaptersByKind[adapter.Kind()] = adapter
 		}
 		for _, restore := range plan.ClientRestores {
