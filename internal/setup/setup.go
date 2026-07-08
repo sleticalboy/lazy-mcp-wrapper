@@ -34,10 +34,20 @@ type Options struct {
 type Plan struct {
 	DetectedClients []ClientInfo
 	WrapperConfigs  []WrapperConfigPlan
+	Decisions       []ServerDecision
 	ClientUpdates   []ClientUpdate
 	DaemonConfig    DaemonConfigPlan
 	LaunchAgent     LaunchAgentPlan
 	Blockers        []string
+}
+
+type ServerDecision struct {
+	ClientKind string
+	ConfigPath string
+	Name       string
+	Action     string
+	Reason     string
+	Detail     string
 }
 
 type WrapperConfigPlan struct {
@@ -100,16 +110,19 @@ func NewPlan(opts Options) (Plan, error) {
 				continue
 			}
 			if isWrapperRef(server, socketPath) || isHTTPWrapperRef(server) {
+				plan.Decisions = append(plan.Decisions, serverDecision(adapter, server, "skip", "skipped-existing-wrapper", "already points to lazy-mcp-wrapper"))
 				continue
 			}
 			if canWrapServer(opts.Home, server) {
 				server.IsWrappable = true
+				plan.Decisions = append(plan.Decisions, serverDecision(adapter, server, "wrap", wrappedReason(server), "will be managed by lazy-mcp-wrapper"))
 				key := strings.ToLower(server.Name)
 				if _, exists := wrappable[key]; !exists {
 					wrappable[key] = server
 				}
 			} else {
 				skippedByName[strings.ToLower(server.Name)] = true
+				plan.Decisions = append(plan.Decisions, serverDecision(adapter, server, "skip", skippedReason(server), skippedDetail(server)))
 				key := strings.ToLower(server.Name)
 				if isChatGPTManagedRemoteMCP(server) {
 					chatGPTSkipped[key] = server
@@ -199,6 +212,72 @@ func NewPlan(opts Options) (Plan, error) {
 	plan.LaunchAgent = defaultLaunchAgentPlan(opts)
 
 	return plan, nil
+}
+
+func serverDecision(adapter ClientAdapter, server RawServer, action, reason, detail string) ServerDecision {
+	return ServerDecision{
+		ClientKind: adapter.Kind(),
+		ConfigPath: adapter.ConfigPath(),
+		Name:       server.Name,
+		Action:     action,
+		Reason:     reason,
+		Detail:     detail,
+	}
+}
+
+func wrappedReason(server RawServer) string {
+	if isOAuthManagedRemoteMCP(server) {
+		return "wrapped-oauth-credential"
+	}
+	switch effectiveType(server) {
+	case "http", "streamable-http":
+		if isLocalHTTPMCP(server) {
+			return "wrapped-local-http"
+		}
+		if strings.EqualFold(server.Auth, "none") {
+			return "wrapped-auth-none"
+		}
+		if hasExplicitHTTPAuth(server) {
+			return "wrapped-explicit-auth"
+		}
+	}
+	return "wrapped-stdio"
+}
+
+func skippedReason(server RawServer) string {
+	if strings.EqualFold(server.Name, "node_repl") || strings.Contains(strings.ToLower(filepath.Base(server.Command)), "node_repl") {
+		return "skipped-node-repl"
+	}
+	if isChatGPTManagedRemoteMCP(server) {
+		return "skipped-chatgpt-auth"
+	}
+	if isFigmaRemoteMCP(server) && server.OAuthClientID == "" {
+		return "skipped-figma-dynamic-client-rejected"
+	}
+	if isOAuthManagedRemoteMCP(server) {
+		return "skipped-oauth-missing-credential"
+	}
+	if server.URL != "" && !isLocalHTTPMCP(server) && !strings.EqualFold(server.Auth, "none") && !hasExplicitHTTPAuth(server) {
+		return "skipped-url-only-remote"
+	}
+	return "skipped-invalid-config"
+}
+
+func skippedDetail(server RawServer) string {
+	switch skippedReason(server) {
+	case "skipped-node-repl":
+		return "node_repl keeps process-local state and should stay direct"
+	case "skipped-chatgpt-auth":
+		return "Codex owns per-session ChatGPT auth headers"
+	case "skipped-figma-dynamic-client-rejected":
+		return "Figma rejected dynamic OAuth client registration"
+	case "skipped-oauth-missing-credential":
+		return "run auth login before wrapping this OAuth remote"
+	case "skipped-url-only-remote":
+		return "remote HTTP auth model is not explicit"
+	default:
+		return "not wrappable by current setup rules"
+	}
 }
 
 func oauthRemoteBlocker(name string, server RawServer) string {

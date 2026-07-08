@@ -79,24 +79,26 @@
 
 目标：让 `setup` 和 `setup --dry-run` 清楚解释每个 server 为什么被包装、跳过或保持直连。
 
+当前状态：已完成核心 setup plan。`NewPlan` 会记录结构化 decision，`PrintPlan` 会输出 reason code；测试已覆盖 Figma、ChatGPT-auth、URL-only remote、OAuth credential、node_repl/现有 wrapper ref 等主要路径。
+
 范围：
 
 - 为 plan 决策增加结构化 reason code：
-  - `wrapped-stdio`
-  - `wrapped-local-http`
-  - `wrapped-explicit-auth`
-  - `wrapped-auth-none`
-  - `wrapped-oauth-credential`
-  - `skipped-node-repl`
+  - `wrapped-stdio`（已完成）
+  - `wrapped-local-http`（已完成）
+  - `wrapped-explicit-auth`（已完成）
+  - `wrapped-auth-none`（已完成）
+  - `wrapped-oauth-credential`（已完成）
+  - `skipped-node-repl`（已完成）
   - `skipped-stateful-direct`，仅在未来需要该规则时使用
-  - `skipped-url-only-remote`
-  - `skipped-oauth-missing-credential`
-  - `skipped-figma-dynamic-client-rejected`
-  - `skipped-chatgpt-auth`
-  - `skipped-existing-wrapper`
-  - `skipped-invalid-config`
-- dry-run 输出展示这些原因。
-- 保留现有人类可读 blocker，但尽量从同一份结构化 reason 派生。
+  - `skipped-url-only-remote`（已完成）
+  - `skipped-oauth-missing-credential`（已完成）
+  - `skipped-figma-dynamic-client-rejected`（已完成）
+  - `skipped-chatgpt-auth`（已完成）
+  - `skipped-existing-wrapper`（已完成）
+  - `skipped-invalid-config`（已完成）
+- dry-run 输出展示这些原因。（已完成）
+- 保留现有人类可读 blocker，但尽量从同一份结构化 reason 派生。（部分完成；blocker 文案仍保留现有路径）
 - 只有在能复用同一 plan model 时，再考虑增加机器可读 JSON 输出。
 
 验收：
@@ -109,23 +111,25 @@
 
 目标：daemon 配置变化时，避免替换未变化的 proxy。
 
+当前状态：已完成。reload 会对同名且 wrapper config fingerprint 未变化的 server 复用原 proxy、logger、stats 和 closer；只有新增、删除或配置变化的 server 进入新建或关闭流程。
+
 范围：
 
-- 为每个 MCP wrapper config 计算稳定 fingerprint。
-- reload 时，如果 name 和 fingerprint 都未变化，保留现有 proxy instance。
-- 对新增或配置变化的 server 启动新 proxy。
+- 为每个 MCP wrapper config 计算稳定 fingerprint。（已完成）
+- reload 时，如果 name 和 fingerprint 都未变化，保留现有 proxy instance。（已完成）
+- 对新增或配置变化的 server 启动新 proxy。（已完成）
 - 对移除或配置变化的旧 proxy，按现有 reload 模式关闭：
-  - 默认模式：有活跃 client 时仍返回 busy。
-  - `--graceful`：新 client 使用新 generation，旧活跃 client 自然 drain。
-  - `--force`：立即关闭旧真实 MCP 进程。
-- 未变化 proxy 的 runtime stats 保留。
+  - 默认模式：有活跃 client 时仍返回 busy。（已完成）
+  - `--graceful`：新 client 使用新 generation，旧活跃 client 自然 drain。（已完成）
+  - `--force`：立即关闭旧真实 MCP 进程。（已完成）
+- 未变化 proxy 的 runtime stats 保留。（已完成）
 
 验收：
 
-- reload 测试证明未变化的 shared proxy 保持真实 MCP 进程和统计数据。
-- 配置变化的 server 生成新的 proxy generation。
-- 被移除的 server 在 reload 后从 status 消失。
-- 现有 busy、graceful、force 语义不变。
+- reload 测试证明未变化的 shared proxy 保持真实 MCP 进程和统计数据。（已完成）
+- 配置变化的 server 生成新的 proxy generation。（已有 reload 替换测试覆盖）
+- 被移除的 server 在 reload 后从 status 消失。（已有 reload 替换测试覆盖）
+- 现有 busy、graceful、force 语义不变。（已有测试覆盖）
 
 ## 低优先级
 

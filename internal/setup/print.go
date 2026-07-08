@@ -21,6 +21,17 @@ func PrintPlan(out io.Writer, plan Plan) {
 		fmt.Fprintf(out, "  %-22s %-40s [%s]\n", cfg.Server.Name, commandLine(cfg.Server), cfg.Content.Sharing)
 	}
 	fmt.Fprintln(out)
+	if len(plan.Decisions) > 0 {
+		fmt.Fprintln(out, "Plan decisions:")
+		for _, decision := range plan.Decisions {
+			detail := ""
+			if decision.Detail != "" {
+				detail = " - " + decision.Detail
+			}
+			fmt.Fprintf(out, "  %-14s %-22s %-5s %-36s%s\n", decision.ClientKind, decision.Name, decision.Action, decision.Reason, detail)
+		}
+		fmt.Fprintln(out)
+	}
 	fmt.Fprintf(out, "Daemon config: %s\n", plan.DaemonConfig.ConfigPath)
 	fmt.Fprintf(out, "Socket:        %s\n", plan.DaemonConfig.SocketPath)
 	switch currentGOOS {

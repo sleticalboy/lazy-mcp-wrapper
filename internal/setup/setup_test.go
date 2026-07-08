@@ -50,6 +50,8 @@ args = ["@playwright/mcp@latest"]
 	if len(plan.ClientUpdates) != 1 {
 		t.Fatalf("client updates = %#v", plan.ClientUpdates)
 	}
+	assertDecision(t, plan, "context7", "wrap", "wrapped-stdio")
+	assertDecision(t, plan, "playwright", "wrap", "wrapped-stdio")
 	if plan.DaemonConfig.SocketPath != socketPath(home) {
 		t.Fatalf("socket path = %s", plan.DaemonConfig.SocketPath)
 	}
@@ -89,6 +91,7 @@ url = "https://example.test/mcp"
 	if cfg.Auth != "none" {
 		t.Fatalf("auth = %q, want none", cfg.Auth)
 	}
+	assertDecision(t, plan, "remote", "wrap", "wrapped-auth-none")
 	if len(plan.ClientUpdates) != 1 {
 		t.Fatalf("client updates = %#v", plan.ClientUpdates)
 	}
@@ -126,6 +129,7 @@ url = "https://example.test/mcp"
 	if len(plan.Blockers) == 0 {
 		t.Fatal("expected blocker when only URL-only remote MCP is configured")
 	}
+	assertDecision(t, plan, "remote", "skip", "skipped-url-only-remote")
 }
 
 func TestPlanWrapsRemoteMCPWithAuthorizationHeader(t *testing.T) {
@@ -157,6 +161,7 @@ Authorization = "Bearer test-token"
 	if cfg.Headers["Authorization"] != "Bearer test-token" {
 		t.Fatalf("headers = %#v", cfg.Headers)
 	}
+	assertDecision(t, plan, "remote", "wrap", "wrapped-explicit-auth")
 }
 
 func TestPlanSkipsFigmaRemoteMCP(t *testing.T) {
@@ -191,6 +196,7 @@ url = "https://mcp.figma.com/mcp"
 	if strings.Contains(blockers, "auth login figma") {
 		t.Fatalf("blockers should not suggest auth login without oauth client id: %#v", plan.Blockers)
 	}
+	assertDecision(t, plan, "figma", "skip", "skipped-figma-dynamic-client-rejected")
 }
 
 func TestPlanSkipsFigmaRemoteMCPWithOAuthClientID(t *testing.T) {
@@ -230,6 +236,7 @@ client_id = "figma-client"
 	if !strings.Contains(strings.Join(plan.Blockers, "\n"), "auth login figma") {
 		t.Fatalf("blockers = %#v, want auth login hint", plan.Blockers)
 	}
+	assertDecision(t, plan, "figma", "skip", "skipped-oauth-missing-credential")
 }
 
 func TestPlanWrapsFigmaRemoteMCPWithOAuthCredential(t *testing.T) {
@@ -270,6 +277,7 @@ client_id = "figma-client"
 	if len(plan.WrapperConfigs) != 1 {
 		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
 	}
+	assertDecision(t, plan, "figma", "wrap", "wrapped-oauth-credential")
 	cfg := plan.WrapperConfigs[0].Content
 	if cfg.Name != "figma" || cfg.Auth != "oauth" || cfg.Sharing != "session" || cfg.URL != "https://mcp.figma.com/mcp" || cfg.LocalPort == 0 {
 		t.Fatalf("figma wrapper config = %#v", cfg)
@@ -324,6 +332,7 @@ auth = "oauth"
 	if !strings.Contains(strings.Join(plan.Blockers, "\n"), "auth login remote") {
 		t.Fatalf("blockers = %#v, want auth login hint", plan.Blockers)
 	}
+	assertDecision(t, plan, "remote", "skip", "skipped-oauth-missing-credential")
 }
 
 func TestPlanSkipsChatGPTAuthRemoteMCP(t *testing.T) {
@@ -356,6 +365,7 @@ auth = "chatgpt"
 	if strings.Contains(blockers, "auth login figma") {
 		t.Fatalf("blockers should not suggest OAuth login for chatgpt auth: %#v", plan.Blockers)
 	}
+	assertDecision(t, plan, "figma", "skip", "skipped-chatgpt-auth")
 }
 
 func TestBuildWrapperConfigSplitsKnownInlineCommand(t *testing.T) {
@@ -369,6 +379,30 @@ func TestBuildWrapperConfigSplitsKnownInlineCommand(t *testing.T) {
 	if len(cfg.Args) != 1 || cfg.Args[0] != "@playwright/mcp@latest" {
 		t.Fatalf("args = %#v", cfg.Args)
 	}
+}
+
+func TestPlanDecisionForExistingWrapperRef(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.context7]
+type = "stdio"
+command = "/bin/lazy-mcp-wrapper"
+args = ["client", "--socket", "`+socketPath(home)+`", "--name", "context7"]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	assertDecision(t, plan, "context7", "skip", "skipped-existing-wrapper")
 }
 
 func TestMergeConfigPathsByNamePrefersNewWrapperPath(t *testing.T) {
@@ -480,4 +514,14 @@ args = ["-y","@upstash/context7-mcp"]
 	if !strings.Contains(string(updated), `/bin/lazy-mcp-wrapper`) {
 		t.Fatalf("client config not updated:\n%s", string(updated))
 	}
+}
+
+func assertDecision(t *testing.T, plan Plan, name, action, reason string) {
+	t.Helper()
+	for _, decision := range plan.Decisions {
+		if decision.Name == name && decision.Action == action && decision.Reason == reason {
+			return
+		}
+	}
+	t.Fatalf("missing decision name=%s action=%s reason=%s in %#v", name, action, reason, plan.Decisions)
 }

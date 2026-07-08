@@ -254,51 +254,72 @@ func (s *Server) reloadFromConfigLocked(reloadedAt time.Time) (*resourceSet, err
 	loggers := make(map[string]*log.Logger, len(cfg.ConfigPaths))
 	closers := make(map[string]io.Closer, len(cfg.ConfigPaths))
 	stats := make(map[string]*proxyStats, len(cfg.ConfigPaths))
-	next := &Server{
-		socketPath: s.socketPath,
-		configs:    configs,
-		proxies:    proxies,
-		loggers:    loggers,
-		closers:    closers,
-		stats:      stats,
+	created := resourceSet{proxies: map[string]*wrapper.Proxy{}, closers: map[string]io.Closer{}}
+	reused := make(map[string]struct{}, len(cfg.ConfigPaths))
+	cleanupCreated := func() {
+		s.closeResourceSet(created)
 	}
 	for _, path := range cfg.ConfigPaths {
 		mcpConfig, err := wrapper.LoadConfig(path)
 		if err != nil {
-			next.closeResources()
+			cleanupCreated()
 			return nil, fmt.Errorf("load config %s: %w", path, err)
+		}
+		if _, exists := configs[mcpConfig.Name]; exists {
+			cleanupCreated()
+			return nil, fmt.Errorf("duplicate MCP name: %s", mcpConfig.Name)
+		}
+		if oldConfig, exists := s.configs[mcpConfig.Name]; exists && configFingerprint(oldConfig) == configFingerprint(mcpConfig) {
+			configs[mcpConfig.Name] = oldConfig
+			if proxy := s.proxies[mcpConfig.Name]; proxy != nil {
+				proxies[mcpConfig.Name] = proxy
+			}
+			if logger := s.loggers[mcpConfig.Name]; logger != nil {
+				loggers[mcpConfig.Name] = logger
+			}
+			if closer := s.closers[mcpConfig.Name]; closer != nil {
+				closers[mcpConfig.Name] = closer
+			}
+			if stat := s.stats[mcpConfig.Name]; stat != nil {
+				stats[mcpConfig.Name] = stat
+			} else {
+				stats[mcpConfig.Name] = newProxyStats(time.Time{})
+			}
+			reused[mcpConfig.Name] = struct{}{}
+			continue
 		}
 		logger, closer, err := wrapper.NewLogger(mcpConfig.LogFile)
 		if err != nil {
-			next.closeResources()
+			cleanupCreated()
 			return nil, fmt.Errorf("open log for %s: %w", mcpConfig.Name, err)
-		}
-		if _, exists := configs[mcpConfig.Name]; exists {
-			if closer != nil {
-				_ = closer.Close()
-			}
-			next.closeResources()
-			return nil, fmt.Errorf("duplicate MCP name: %s", mcpConfig.Name)
 		}
 		stat := newProxyStats(reloadedAt)
 		configs[mcpConfig.Name] = mcpConfig
 		if mcpConfig.Sharing == "shared" {
-			proxies[mcpConfig.Name] = s.buildProxy(mcpConfig, logger, stat, true)
+			proxy := s.buildProxy(mcpConfig, logger, stat, true)
+			proxies[mcpConfig.Name] = proxy
+			created.proxies[mcpConfig.Name] = proxy
 		}
 		loggers[mcpConfig.Name] = logger
 		stats[mcpConfig.Name] = stat
 		if closer != nil {
 			closers[mcpConfig.Name] = closer
+			created.closers[mcpConfig.Name] = closer
 		}
 	}
-	old := s.currentResourceSetLocked()
+	old := s.obsoleteResourceSetLocked(reused)
 	s.generation++
-	s.configs = next.configs
-	s.proxies = next.proxies
-	s.loggers = next.loggers
-	s.closers = next.closers
-	s.stats = next.stats
+	s.configs = configs
+	s.proxies = proxies
+	s.loggers = loggers
+	s.closers = closers
+	s.stats = stats
 	return old, nil
+}
+
+func configFingerprint(cfg wrapper.Config) string {
+	data, _ := json.Marshal(cfg)
+	return string(data)
 }
 
 func (s *Server) closeResources() {
@@ -309,15 +330,37 @@ func (s *Server) closeResources() {
 	s.retained = nil
 }
 
-func (s *Server) currentResourceSetLocked() *resourceSet {
-	return &resourceSet{
+func (s *Server) obsoleteResourceSetLocked(reused map[string]struct{}) *resourceSet {
+	resources := &resourceSet{
 		generation: s.generation,
-		proxies:    s.proxies,
-		configs:    s.configs,
-		loggers:    s.loggers,
-		closers:    s.closers,
-		stats:      s.stats,
+		proxies:    map[string]*wrapper.Proxy{},
+		configs:    map[string]wrapper.Config{},
+		loggers:    map[string]*log.Logger{},
+		closers:    map[string]io.Closer{},
+		stats:      map[string]*proxyStats{},
 	}
+	for name, cfg := range s.configs {
+		if _, ok := reused[name]; ok {
+			continue
+		}
+		resources.configs[name] = cfg
+		if proxy := s.proxies[name]; proxy != nil {
+			resources.proxies[name] = proxy
+		}
+		if logger := s.loggers[name]; logger != nil {
+			resources.loggers[name] = logger
+		}
+		if closer := s.closers[name]; closer != nil {
+			resources.closers[name] = closer
+		}
+		if stat := s.stats[name]; stat != nil {
+			resources.stats[name] = stat
+		}
+	}
+	if len(resources.proxies) == 0 && len(resources.configs) == 0 && len(resources.loggers) == 0 && len(resources.closers) == 0 && len(resources.stats) == 0 {
+		return nil
+	}
+	return resources
 }
 
 func (s *Server) closeResourceSet(resources resourceSet) {

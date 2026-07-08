@@ -471,6 +471,82 @@ func TestControlReloadFromDaemonConfig(t *testing.T) {
 	}
 }
 
+func TestControlReloadReusesUnchangedSharedResources(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+	fakeMCP := buildFakeMCP(t, tempDir)
+
+	configPath := writeWrapperConfig(t, tempDir, wrapper.Config{Name: "fake", Command: fakeMCP})
+	daemonConfigPath := writeDaemonConfig(t, tempDir, socketPath, []string{configPath})
+	server, err := NewServerFromConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("NewServerFromConfig() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	var input bytes.Buffer
+	writer := jsonrpc.NewJSONLWriter(&input)
+	if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(1), Method: "initialize", Params: raw(map[string]any{})}); err != nil {
+		t.Fatalf("write initialize: %v", err)
+	}
+	if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(2), Method: "tools/list", Params: raw(map[string]any{})}); err != nil {
+		t.Fatalf("write tools/list: %v", err)
+	}
+	if err := RunClient(socketPath, "fake", &input, &bytes.Buffer{}); err != nil {
+		t.Fatalf("RunClient() error = %v", err)
+	}
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || !status.Servers[0].HasReal || status.Servers[0].RealPID <= 0 {
+		t.Fatalf("unexpected server status before reload: %#v", status.Servers)
+	}
+	realPID := status.Servers[0].RealPID
+	if status.Servers[0].Calls != 1 {
+		t.Fatalf("calls before reload = %d, want 1", status.Servers[0].Calls)
+	}
+
+	resp, err := SendControl(socketPath, "reload")
+	if err != nil {
+		t.Fatalf("SendControl(reload) error = %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("SendControl(reload) = %#v, want ok", resp)
+	}
+
+	status, err = QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].Name != "fake" {
+		t.Fatalf("unexpected servers after reload: %#v", status.Servers)
+	}
+	if status.Servers[0].RealPID != realPID {
+		t.Fatalf("real pid after reload = %d, want reused pid %d", status.Servers[0].RealPID, realPID)
+	}
+	if status.Servers[0].Calls != 1 {
+		t.Fatalf("calls after reload = %d, want preserved calls 1", status.Servers[0].Calls)
+	}
+	if status.Servers[0].LastReloadedAt != nil {
+		t.Fatalf("last_reloaded_at after unchanged reload = %v, want nil", status.Servers[0].LastReloadedAt)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func TestControlReloadBusyRequiresForce(t *testing.T) {
 	tempDir := t.TempDir()
 	socketPath := testSocketPath(t)
