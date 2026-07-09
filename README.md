@@ -18,7 +18,7 @@ Check the result:
 lazy-mcp-wrapper setup status
 ```
 
-Recent user-visible changes are tracked in [release notes](./docs/release-notes.md).
+Recent user-visible changes are tracked in [release notes](./docs/release-notes.md). Common startup issues are covered in [troubleshooting](./docs/troubleshooting.md).
 
 ![setup status](./docs/setup-status.svg)
 
