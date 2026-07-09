@@ -1,5 +1,10 @@
 # Release Notes
 
+## v0.5.3
+
+- Fixed `setup update` so existing daemon config paths outside the managed wrapper directory are preserved when the matching client entry already points at `lazy-mcp-wrapper`.
+- This prevents valid entries such as an external `context7.json` from being dropped during unrelated cleanup updates.
+
 ## v0.5.2
 
 - Fixed `setup update` so HTTP wrapper configs scheduled for removal no longer leak their local port back into client config rewrites.
