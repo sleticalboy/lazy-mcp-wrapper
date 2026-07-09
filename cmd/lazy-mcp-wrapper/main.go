@@ -723,6 +723,8 @@ func runSetup(args []string) {
 	configPaths := multiFlag{}
 	fs.Var(&configPaths, "config", "client MCP config to scan; can be repeated and later entries override earlier entries by server name")
 	_ = fs.Parse(args)
+	watchInterval := 2 * time.Second
+	watchApply := false
 	subcmd := ""
 	subcmdArgs := fs.Args()
 	if len(subcmdArgs) > 0 {
@@ -736,6 +738,10 @@ func runSetup(args []string) {
 		subFS.StringVar(home, "home", *home, "home directory to scan; defaults to current user home")
 		subFS.StringVar(binaryPath, "bin", *binaryPath, "lazy-mcp-wrapper binary path; defaults to current executable")
 		subFS.Var(&configPaths, "config", "client MCP config to scan; can be repeated and later entries override earlier entries by server name")
+		if subcmd == "watch" {
+			subFS.DurationVar(&watchInterval, "interval", watchInterval, "config polling interval")
+			subFS.BoolVar(&watchApply, "apply", false, "automatically run setup update when changes are detected")
+		}
 		_ = subFS.Parse(subcmdArgs)
 	}
 
@@ -780,6 +786,14 @@ func runSetup(args []string) {
 	case "update":
 		if err := setup.Update(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup update: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	case "watch":
+		ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals...)
+		defer stop()
+		if err := setup.Watch(ctx, opts, setup.WatchOptions{Interval: watchInterval, Apply: watchApply, Out: os.Stdout}); err != nil {
+			fmt.Fprintf(os.Stderr, "lazy-mcp-wrapper setup watch: %v\n", err)
 			os.Exit(1)
 		}
 		return

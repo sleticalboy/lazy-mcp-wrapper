@@ -20,6 +20,7 @@
 - [x] **1. `setup status`**：检查当前安装状态，展示哪些 client 已经 wrap、daemon 是否在跑
 - [x] **2. `setup uninstall`**：还原各 client 配置（从 backup 恢复或移除 wrapper 引用）、停止并卸载 LaunchAgent、可选删除 wrapper config 文件
 - [x] **3. `setup update`**：重新扫描各 client 配置，检测新增/移除的 MCP server，diff 展示变化，按需更新 wrapper config 和 daemon config，reload daemon
+- [x] **4. `setup watch`**：轮询 client config、wrapper config 和 daemon config，检测变化后自动展示 `setup update` diff；可选 `--apply` 自动执行 update
 
 ---
 

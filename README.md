@@ -200,6 +200,7 @@ lazy-mcp-wrapper reload --socket ~/.lazy-mcp-wrapper/lazy-mcpd.sock --force
 lazy-mcp-wrapper setup --dry-run
 lazy-mcp-wrapper setup
 lazy-mcp-wrapper setup --yes
+lazy-mcp-wrapper setup watch
 ```
 
 To scan explicit client config files instead of known client locations, pass `--config PATH`. The flag can be repeated; later files override earlier files by MCP server name:
@@ -216,6 +217,18 @@ Supported clients:
 - Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 The command wraps stdio MCP servers, skips `node_repl`, and uses `sharing: "session"` for Playwright. Remote HTTP MCP servers are conservative by default: local HTTP servers, remote servers with explicit auth headers, remote servers marked with `auth: "none"`, and standard OAuth remotes with an existing local wrapper credential can be wrapped. URL-only remotes, Figma, and `auth: "chatgpt"` remotes stay configured directly in the client.
+
+`setup watch` polls known client MCP config files, the wrapper config directory, and the daemon config. When a change is detected, it prints the same diff as `setup update --dry-run`. It does not write files by default:
+
+```bash
+lazy-mcp-wrapper setup watch --interval 2s
+```
+
+Use `--apply` only when you want detected changes to run `setup update --yes` automatically:
+
+```bash
+lazy-mcp-wrapper setup watch --apply
+```
 
 ## Shared Daemon Mode
 
