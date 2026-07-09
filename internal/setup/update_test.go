@@ -175,3 +175,61 @@ func TestUpdateAddsFigmaWrapperWhenOAuthCredentialExists(t *testing.T) {
 		t.Fatalf("figma oauth scopes = %#v", cfg.OAuthScopes)
 	}
 }
+
+func TestUpdateDoesNotRewriteRemovedHTTPWrapperRefs(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.context7]
+type = "stdio"
+command = "/bin/lazy-mcp-wrapper"
+args = ["client","--socket","`+socketPath(home)+`","--name","context7"]
+
+[mcp_servers.figma]
+type = "streamable-http"
+url = "https://mcp.figma.com/mcp"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapperDir := wrappersDir(home)
+	if err := os.MkdirAll(wrapperDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wrapperDir, "context7.json"), []byte(`{
+  "schema_version": 1,
+  "name": "context7",
+  "sharing": "shared",
+  "command": "npx",
+  "args": ["context7"]
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wrapperDir, "figma.json"), []byte(`{
+  "schema_version": 1,
+  "name": "figma",
+  "sharing": "shared",
+  "url": "https://mcp.figma.com/mcp",
+  "protocol": "streamable-http",
+  "local_port": 54301
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewUpdatePlan(Options{Home: home, BinaryPath: "/bin/lazy-mcp-wrapper"})
+	if err != nil {
+		t.Fatalf("NewUpdatePlan() error = %v", err)
+	}
+	if len(plan.RemovedWrappers) != 1 || plan.RemovedWrappers[0].Name != "figma" {
+		t.Fatalf("removed wrappers = %#v", plan.RemovedWrappers)
+	}
+	for _, update := range plan.ClientUpdates {
+		if strings.Contains(string(update.NewContent), `url = "http://127.0.0.1:54301"`) {
+			t.Fatalf("removed figma wrapper local port leaked into client update:\n%s", string(update.NewContent))
+		}
+	}
+}

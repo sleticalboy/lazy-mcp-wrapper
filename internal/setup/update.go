@@ -131,7 +131,7 @@ func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 	}
 	plan.DaemonConfig = daemonPlan
 
-	localPorts := localPortsForUpdate(existing, plan.AddedWrappers)
+	localPorts := localPortsForUpdate(existing, plan.AddedWrappers, plan.RemovedWrappers)
 	for _, adapter := range scanClients(opts.Home, opts.ConfigPaths) {
 		servers, err := adapter.ReadServers()
 		if err != nil {
@@ -201,11 +201,21 @@ func Update(opts Options) error {
 	return nil
 }
 
-func localPortsForUpdate(existing []existingWrapperConfig, added []WrapperConfigPlan) map[string]int {
+func localPortsForUpdate(existing []existingWrapperConfig, added []WrapperConfigPlan, removed []existingWrapperConfig) map[string]int {
 	ports := map[string]int{}
+	removedByPath := map[string]bool{}
+	removedByName := map[string]bool{}
+	for _, cfg := range removed {
+		removedByPath[cfg.Path] = true
+		removedByName[strings.ToLower(canonicalName(cfg.Name))] = true
+	}
 	for _, cfg := range existing {
+		name := strings.ToLower(canonicalName(cfg.Name))
+		if removedByPath[cfg.Path] || removedByName[name] {
+			continue
+		}
 		if cfg.Config.LocalPort > 0 {
-			ports[strings.ToLower(canonicalName(cfg.Name))] = cfg.Config.LocalPort
+			ports[name] = cfg.Config.LocalPort
 		}
 	}
 	for name, port := range localPortsByName(added) {
