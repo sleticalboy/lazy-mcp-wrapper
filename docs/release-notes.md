@@ -1,5 +1,10 @@
 # Release Notes
 
+## v0.5.4
+
+- Enhanced `setup status` to report client/daemon mismatches such as `missing daemon wrapper: context7`.
+- This makes stale client wrapper references visible before a new AI client reports an MCP startup warning.
+
 ## v0.5.3
 
 - Fixed `setup update` so existing daemon config paths outside the managed wrapper directory are preserved when the matching client entry already points at `lazy-mcp-wrapper`.

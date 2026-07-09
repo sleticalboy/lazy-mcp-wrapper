@@ -21,6 +21,13 @@ If the daemon status shows `Last error: unknown MCP name: context7`, the client
 is still pointing at `lazy-mcp-wrapper client --name context7`, but the daemon
 does not have a matching wrapper config loaded.
 
+In `lazy-mcp-wrapper v0.5.4` and newer, `setup status` also reports this
+configuration mismatch directly in the client `Notes` column:
+
+```text
+missing daemon wrapper: context7
+```
+
 Recovery:
 
 ```bash

@@ -26,8 +26,15 @@ func PrintStatusReport(out io.Writer, report StatusReport) {
 		if client.Installed {
 			wrapped = fmt.Sprintf("%d", client.WrappedCount)
 			total = fmt.Sprintf("%d", client.TotalCount)
+			var noteParts []string
 			if len(client.NotWrapped) > 0 {
-				notes = fmt.Sprintf("(%d not wrapped: %s)", len(client.NotWrapped), strings.Join(client.NotWrapped, ", "))
+				noteParts = append(noteParts, fmt.Sprintf("%d not wrapped: %s", len(client.NotWrapped), strings.Join(client.NotWrapped, ", ")))
+			}
+			if len(client.Issues) > 0 {
+				noteParts = append(noteParts, strings.Join(client.Issues, "; "))
+			}
+			if len(noteParts) > 0 {
+				notes = "(" + strings.Join(noteParts, "; ") + ")"
 			}
 			if client.ReadError != "" {
 				notes = client.ReadError
