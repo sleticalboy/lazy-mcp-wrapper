@@ -12,9 +12,10 @@ import (
 )
 
 type existingWrapperConfig struct {
-	Name   string
-	Path   string
-	Config wrapper.Config
+	Name    string
+	Path    string
+	Config  wrapper.Config
+	Managed bool
 }
 
 func isWrapperRef(server RawServer, socketPath string) bool {
@@ -67,9 +68,10 @@ func listWrapperConfigs(wrapperDir string) ([]existingWrapperConfig, error) {
 			return nil, err
 		}
 		configs = append(configs, existingWrapperConfig{
-			Name:   canonicalName(cfg.Name),
-			Path:   path,
-			Config: cfg,
+			Name:    canonicalName(cfg.Name),
+			Path:    path,
+			Config:  cfg,
+			Managed: true,
 		})
 	}
 	return configs, nil

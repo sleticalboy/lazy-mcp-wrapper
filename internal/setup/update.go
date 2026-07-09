@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/binlee/lazy-mcp-wrapper/internal/daemon"
+	"github.com/binlee/lazy-mcp-wrapper/internal/wrapper"
 )
 
 type UpdatePlan struct {
@@ -24,7 +25,7 @@ type UpdatePlan struct {
 func NewUpdatePlan(opts Options) (UpdatePlan, error) {
 	opts = normalizeOptions(opts)
 	wrapperDir := wrappersDir(opts.Home)
-	existing, err := listWrapperConfigs(wrapperDir)
+	existing, err := listUpdateWrapperConfigs(opts.Home, wrapperDir)
 	if err != nil {
 		return UpdatePlan{}, err
 	}
@@ -176,6 +177,9 @@ func Update(opts Options) error {
 			return err
 		}
 		for _, cfg := range plan.RemovedWrappers {
+			if !cfg.Managed {
+				continue
+			}
 			if err := os.Remove(cfg.Path); err != nil && !os.IsNotExist(err) {
 				return err
 			}
@@ -199,6 +203,34 @@ func Update(opts Options) error {
 		}
 	}
 	return nil
+}
+
+func listUpdateWrapperConfigs(home, wrapperDir string) ([]existingWrapperConfig, error) {
+	configs, err := listWrapperConfigs(wrapperDir)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, cfg := range configs {
+		seen[cfg.Path] = true
+	}
+	for _, path := range existingDaemonConfigPaths(daemonConfigPath(home)) {
+		if path == "" || seen[path] {
+			continue
+		}
+		cfg, err := wrapper.LoadConfig(path)
+		if err != nil {
+			continue
+		}
+		configs = append(configs, existingWrapperConfig{
+			Name:    canonicalName(cfg.Name),
+			Path:    path,
+			Config:  cfg,
+			Managed: false,
+		})
+		seen[path] = true
+	}
+	return configs, nil
 }
 
 func localPortsForUpdate(existing []existingWrapperConfig, added []WrapperConfigPlan, removed []existingWrapperConfig) map[string]int {

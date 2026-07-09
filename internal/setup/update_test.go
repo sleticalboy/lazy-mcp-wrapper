@@ -233,3 +233,57 @@ url = "https://mcp.figma.com/mcp"
 		}
 	}
 }
+
+func TestUpdatePreservesExternalDaemonConfigForExistingWrapperRef(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.context7]
+type = "stdio"
+command = "/bin/lazy-mcp-wrapper"
+args = ["client","--socket","`+socketPath(home)+`","--name","context7"]
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	externalPath := filepath.Join(home, "external", "context7.json")
+	if err := os.MkdirAll(filepath.Dir(externalPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(externalPath, []byte(`{
+  "schema_version": 1,
+  "name": "context7",
+  "sharing": "shared",
+  "command": "npx",
+  "args": ["-y", "@upstash/context7-mcp"]
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	daemonData, err := buildDaemonConfigContent(socketPath(home), []string{externalPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(daemonConfigPath(home)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(daemonConfigPath(home), daemonData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewUpdatePlan(Options{Home: home, BinaryPath: "/bin/lazy-mcp-wrapper"})
+	if err != nil {
+		t.Fatalf("NewUpdatePlan() error = %v", err)
+	}
+	if len(plan.RemovedWrappers) != 0 {
+		t.Fatalf("removed wrappers = %#v", plan.RemovedWrappers)
+	}
+	if len(plan.DaemonConfig.ConfigPaths) != 1 || plan.DaemonConfig.ConfigPaths[0] != externalPath {
+		t.Fatalf("daemon config paths = %#v, want %s", plan.DaemonConfig.ConfigPaths, externalPath)
+	}
+	if len(plan.ClientUpdates) != 0 {
+		t.Fatalf("client updates = %#v", plan.ClientUpdates)
+	}
+}
