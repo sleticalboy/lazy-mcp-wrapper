@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 type WatchOptions struct {
@@ -42,20 +44,64 @@ func Watch(ctx context.Context, opts Options, watchOpts WatchOptions) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Watching MCP config files every %s. Press Ctrl+C to stop.\n", interval)
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+	if err := syncFSNotifyWatches(watcher, previous); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Watching MCP config files with fsnotify (debounce %s). Press Ctrl+C to stop.\n", interval)
 	printWatchedPaths(out, previous)
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	var debounce <-chan time.Time
+	var timer *time.Timer
+	trigger := func() {
+		if timer == nil {
+			timer = time.NewTimer(interval)
+			debounce = timer.C
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(interval)
+		debounce = timer.C
+	}
 	for {
 		select {
 		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
 			return nil
-		case <-ticker.C:
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil
+			}
+			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename|fsnotify.Chmod) != 0 {
+				trigger()
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
+			fmt.Fprintf(out, "\nwatch event error: %v\n", err)
+		case <-debounce:
+			debounce = nil
+			timer = nil
 			next, err := newWatchSnapshot(opts)
 			if err != nil {
 				fmt.Fprintf(out, "\nwatch scan failed: %v\n", err)
 				continue
+			}
+			if err := syncFSNotifyWatches(watcher, next); err != nil {
+				fmt.Fprintf(out, "\nwatch update failed: %v\n", err)
 			}
 			changed := changedWatchPaths(previous, next)
 			if len(changed) == 0 {
@@ -116,6 +162,65 @@ func newWatchSnapshot(opts Options) (watchSnapshot, error) {
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+func syncFSNotifyWatches(watcher *fsnotify.Watcher, snapshot watchSnapshot) error {
+	want := fsnotifyWatchPaths(snapshot)
+	current := map[string]bool{}
+	for _, path := range watcher.WatchList() {
+		current[path] = true
+	}
+	for path := range current {
+		if !want[path] {
+			if err := watcher.Remove(path); err != nil {
+				return err
+			}
+		}
+	}
+	for path := range want {
+		if current[path] {
+			continue
+		}
+		if err := watcher.Add(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fsnotifyWatchPaths(snapshot watchSnapshot) map[string]bool {
+	paths := map[string]bool{}
+	for path, state := range snapshot {
+		if state.Exists && state.IsDir {
+			paths[path] = true
+			continue
+		}
+		if dir := nearestExistingDir(filepath.Dir(path)); dir != "" {
+			paths[dir] = true
+		}
+	}
+	return paths
+}
+
+func nearestExistingDir(path string) string {
+	for path != "" && path != "." {
+		info, err := os.Stat(path)
+		if err == nil && info.IsDir() {
+			return path
+		}
+		next := filepath.Dir(path)
+		if next == path {
+			break
+		}
+		path = next
+	}
+	return ""
+}
+
+func watchedFSNotifyPaths(watcher *fsnotify.Watcher) []string {
+	paths := watcher.WatchList()
+	sort.Strings(paths)
+	return paths
 }
 
 func watchedConfigPaths(opts Options) []string {

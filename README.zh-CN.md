@@ -358,7 +358,7 @@ lazy-mcp-wrapper setup --config ./base-mcp.json --config ./local-mcp.toml --dry-
 
 `setup` 会生成 wrapper config、daemon config、LaunchAgent plist，并备份后更新各 client 的 MCP 配置。它会包装 stdio MCP，`node_repl` 会跳过，Playwright 会自动使用 `sharing: "session"`。远程 HTTP MCP 只在认证模型明确时包装：本地 HTTP、显式 credential header、`auth = "none"`、或已有本地 wrapper OAuth 凭据的标准 OAuth 远程 MCP。只有 URL 的远程 MCP、Figma、以及 `auth = "chatgpt"` 的远程 MCP 会保持客户端直连。
 
-`setup watch` 会轮询已知 client MCP 配置文件、wrapper config 目录和 daemon config。检测到变化后，它会打印和 `setup update --dry-run` 相同的 diff；默认不写文件：
+`setup watch` 使用文件系统通知监听已知 client MCP 配置文件、wrapper config 目录和 daemon config。检测到变化后，它会打印和 `setup update --dry-run` 相同的 diff；默认不写文件，`--interval` 控制文件事件后的 debounce 窗口：
 
 ```bash
 lazy-mcp-wrapper setup watch --interval 2s

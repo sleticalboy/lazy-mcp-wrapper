@@ -739,7 +739,7 @@ func runSetup(args []string) {
 		subFS.StringVar(binaryPath, "bin", *binaryPath, "lazy-mcp-wrapper binary path; defaults to current executable")
 		subFS.Var(&configPaths, "config", "client MCP config to scan; can be repeated and later entries override earlier entries by server name")
 		if subcmd == "watch" {
-			subFS.DurationVar(&watchInterval, "interval", watchInterval, "config polling interval")
+			subFS.DurationVar(&watchInterval, "interval", watchInterval, "config change debounce interval")
 			subFS.BoolVar(&watchApply, "apply", false, "automatically run setup update when changes are detected")
 		}
 		_ = subFS.Parse(subcmdArgs)

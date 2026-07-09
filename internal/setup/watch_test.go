@@ -45,6 +45,18 @@ func TestWatchSnapshotDetectsClientAndWrapperChanges(t *testing.T) {
 	}
 }
 
+func TestFSNotifyWatchPathsUseNearestExistingParent(t *testing.T) {
+	home := t.TempDir()
+	missingConfig := filepath.Join(home, ".codex", "config.toml")
+	snapshot := watchSnapshot{
+		missingConfig: {},
+	}
+	paths := fsnotifyWatchPaths(snapshot)
+	if !paths[home] {
+		t.Fatalf("watch paths = %#v, want nearest existing parent %s", paths, home)
+	}
+}
+
 func TestUpdatePlanUsesExplicitConfigPaths(t *testing.T) {
 	home := t.TempDir()
 	explicitPath := filepath.Join(home, "explicit.json")

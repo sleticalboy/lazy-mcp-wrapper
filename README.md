@@ -218,7 +218,7 @@ Supported clients:
 
 The command wraps stdio MCP servers, skips `node_repl`, and uses `sharing: "session"` for Playwright. Remote HTTP MCP servers are conservative by default: local HTTP servers, remote servers with explicit auth headers, remote servers marked with `auth: "none"`, and standard OAuth remotes with an existing local wrapper credential can be wrapped. URL-only remotes, Figma, and `auth: "chatgpt"` remotes stay configured directly in the client.
 
-`setup watch` polls known client MCP config files, the wrapper config directory, and the daemon config. When a change is detected, it prints the same diff as `setup update --dry-run`. It does not write files by default:
+`setup watch` uses filesystem notifications to watch known client MCP config files, the wrapper config directory, and the daemon config. When a change is detected, it prints the same diff as `setup update --dry-run`. It does not write files by default; `--interval` controls the debounce window after file events:
 
 ```bash
 lazy-mcp-wrapper setup watch --interval 2s
