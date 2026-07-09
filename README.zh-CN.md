@@ -16,6 +16,8 @@ lazy-mcp-wrapper setup
 lazy-mcp-wrapper setup status
 ```
 
+近期用户可见变化记录在 [release notes](./docs/release-notes.md)。
+
 ![setup status](./docs/setup-status.svg)
 
 ## 它解决什么问题
