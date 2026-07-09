@@ -26,6 +26,7 @@ type Config struct {
 	URL            string            `json:"url,omitempty"`
 	Protocol       string            `json:"protocol,omitempty"`
 	HTTPBackend    string            `json:"http_backend,omitempty"`
+	UpstreamMode   string            `json:"upstream_protocol_mode,omitempty"`
 	Auth           string            `json:"auth,omitempty"`
 	OAuthClientID  string            `json:"oauth_client_id,omitempty"`
 	OAuthResource  string            `json:"oauth_resource,omitempty"`
@@ -116,6 +117,15 @@ func LoadConfig(path string) (Config, error) {
 		default:
 			return Config{}, fmt.Errorf("config http_backend must be native or sdk (got %q)", cfg.HTTPBackend)
 		}
+		cfg.UpstreamMode = strings.ToLower(strings.TrimSpace(cfg.UpstreamMode))
+		switch cfg.UpstreamMode {
+		case "", "auto", "legacy", "stateless":
+		default:
+			return Config{}, fmt.Errorf("config upstream_protocol_mode must be auto, legacy, or stateless (got %q)", cfg.UpstreamMode)
+		}
+		if cfg.UpstreamMode == "stateless" && cfg.UseSDKHTTPBackend() {
+			return Config{}, fmt.Errorf("config upstream_protocol_mode stateless requires native http_backend and auth none")
+		}
 	}
 	if cfg.Sharing == "" {
 		if cfg.RequiresOAuth() {
@@ -186,6 +196,21 @@ func (c Config) HTTPProtocol() string {
 
 func (c Config) UseSDKHTTPBackend() bool {
 	return c.HTTPBackend == "sdk" || c.RequiresOAuth()
+}
+
+func (c Config) UpstreamProtocolMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.UpstreamMode)) {
+	case "legacy":
+		return "legacy"
+	case "stateless":
+		return "stateless"
+	default:
+		return "auto"
+	}
+}
+
+func (c Config) StatelessHTTPUpstream() bool {
+	return c.URL != "" && c.UpstreamProtocolMode() == "stateless"
 }
 
 func (c Config) RequiresOAuth() bool {

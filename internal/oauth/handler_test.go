@@ -38,6 +38,60 @@ func TestStoredTokenHandlerReturnsTokenSource(t *testing.T) {
 	}
 }
 
+func TestStoredTokenHandlerRejectsBindingMismatch(t *testing.T) {
+	store := &FileStore{Dir: t.TempDir()}
+	if err := store.Save(Credential{
+		Name:        "remote",
+		ServerURL:   "https://old.example.test/mcp",
+		ClientID:    "client-id",
+		Resource:    "https://old.example.test",
+		Scopes:      []string{"tools"},
+		AccessToken: "access-token",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	source, err := NewStoredTokenHandlerWithBinding(store, "remote", CredentialBinding{
+		ServerURL: "https://new.example.test/mcp",
+		ClientID:  "client-id",
+		Resource:  "https://old.example.test",
+		Scopes:    []string{"tools"},
+	}).TokenSource(context.Background())
+	if !errors.Is(err, ErrCredentialMismatch) {
+		t.Fatalf("TokenSource() error = %v, want ErrCredentialMismatch", err)
+	}
+	if source != nil {
+		t.Fatalf("TokenSource() = %#v, want nil", source)
+	}
+}
+
+func TestStoredTokenHandlerAcceptsScopeOrderDifference(t *testing.T) {
+	store := &FileStore{Dir: t.TempDir()}
+	if err := store.Save(Credential{
+		Name:        "remote",
+		ServerURL:   "https://example.test/mcp",
+		Scopes:      []string{"files", "tools"},
+		AccessToken: "access-token",
+		TokenType:   "Bearer",
+		Expiry:      time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	source, err := NewStoredTokenHandlerWithBinding(store, "remote", CredentialBinding{
+		ServerURL: "https://example.test/mcp",
+		Scopes:    []string{"tools", "files"},
+	}).TokenSource(context.Background())
+	if err != nil {
+		t.Fatalf("TokenSource() error = %v", err)
+	}
+	if source == nil {
+		t.Fatal("TokenSource() = nil")
+	}
+}
+
 func TestStoredTokenHandlerMissingOrExpiredToken(t *testing.T) {
 	store := &FileStore{Dir: t.TempDir()}
 	source, err := NewStoredTokenHandler(store, "missing").TokenSource(context.Background())

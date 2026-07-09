@@ -60,12 +60,20 @@ func startHTTPReal(ctx context.Context, cfg Config, logger *log.Logger, init ini
 		init:   init,
 		done:   make(chan struct{}),
 	}
-	if err := client.initialize(startCtx, init); err != nil {
-		_ = client.close()
-		return nil, err
+	if cfg.StatelessHTTPUpstream() {
+		if cfg.HTTPProtocol() != "streamable-http" {
+			_ = client.close()
+			return nil, fmt.Errorf("stateless HTTP upstream requires streamable-http protocol")
+		}
+		logger.Printf("skipping initialize for stateless HTTP MCP %s url=%s", cfg.Name, cfg.URL)
+	} else {
+		if err := client.initialize(startCtx, init); err != nil {
+			_ = client.close()
+			return nil, err
+		}
 	}
 	client.touch()
-	logger.Printf("started HTTP MCP %s url=%s protocol=%s", cfg.Name, cfg.URL, cfg.HTTPProtocol())
+	logger.Printf("started HTTP MCP %s url=%s protocol=%s upstream_mode=%s", cfg.Name, cfg.URL, cfg.HTTPProtocol(), cfg.UpstreamProtocolMode())
 	return client, nil
 }
 

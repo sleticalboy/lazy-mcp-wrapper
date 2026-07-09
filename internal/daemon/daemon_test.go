@@ -99,6 +99,158 @@ func TestClientForwardsToSharedDaemon(t *testing.T) {
 	}
 }
 
+func TestClientForwardsToSharedDaemonWithoutInitialize(t *testing.T) {
+	tempDir := t.TempDir()
+	socketPath := testSocketPath(t)
+	fakeMCP := buildFakeMCP(t, tempDir)
+	defer os.Remove(socketPath)
+
+	cfg := wrapper.Config{
+		Name:         "fake",
+		Command:      fakeMCP,
+		DisableCache: true,
+	}
+	cfg.IdleTimeout.Duration = time.Second
+	cfg.StartupTimeout.Duration = 5 * time.Second
+	cfg.CallTimeout.Duration = 5 * time.Second
+
+	server, err := NewServer(socketPath, []wrapper.Config{cfg}, map[string]*log.Logger{
+		"fake": log.New(bytes.NewBuffer(nil), "", 0),
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	var input bytes.Buffer
+	writer := jsonrpc.NewJSONLWriter(&input)
+	if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(1), Method: "tools/list", Params: raw(map[string]any{})}); err != nil {
+		t.Fatalf("write tools/list: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := RunClient(socketPath, "fake", &input, &output); err != nil {
+		t.Fatalf("RunClient() error = %v", err)
+	}
+
+	reader := jsonrpc.NewJSONLReader(&output)
+	listResp, err := reader.Read()
+	if err != nil {
+		t.Fatalf("read tools/list response: %v", err)
+	}
+	if listResp.Error != nil {
+		t.Fatalf("tools/list error = %#v", listResp.Error)
+	}
+	var result struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(listResp.Result, &result); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "echo" {
+		t.Fatalf("unexpected tools: %#v", result.Tools)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+func TestClientServerDiscoverDoesNotStartRealMCP(t *testing.T) {
+	socketPath := testSocketPath(t)
+	defer os.Remove(socketPath)
+
+	cfg := wrapper.Config{
+		Name:         "fake",
+		Sharing:      "shared",
+		Command:      "missing-real-mcp",
+		DisableCache: true,
+	}
+	cfg.IdleTimeout.Duration = time.Second
+	cfg.StartupTimeout.Duration = time.Second
+	cfg.CallTimeout.Duration = time.Second
+
+	server, err := NewServer(socketPath, []wrapper.Config{cfg}, map[string]*log.Logger{
+		"fake": log.New(bytes.NewBuffer(nil), "", 0),
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.Serve(ctx)
+	}()
+	waitForSocket(t, socketPath, errc)
+
+	var input bytes.Buffer
+	writer := jsonrpc.NewJSONLWriter(&input)
+	if err := writer.Write(jsonrpc.Message{JSONRPC: "2.0", ID: raw(1), Method: "server/discover", Params: raw(map[string]any{})}); err != nil {
+		t.Fatalf("write server/discover: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := RunClient(socketPath, "fake", &input, &output); err != nil {
+		t.Fatalf("RunClient() error = %v", err)
+	}
+
+	reader := jsonrpc.NewJSONLReader(&output)
+	discoverResp, err := reader.Read()
+	if err != nil {
+		t.Fatalf("read server/discover response: %v", err)
+	}
+	if discoverResp.Error != nil {
+		t.Fatalf("server/discover error = %#v", discoverResp.Error)
+	}
+	var result struct {
+		ServerInfo struct {
+			Name string `json:"name"`
+		} `json:"serverInfo"`
+		Protocol struct {
+			StatelessInbound bool `json:"stateless_inbound"`
+			LegacyInitialize bool `json:"legacy_initialize"`
+		} `json:"protocol"`
+		StartsUpstream bool `json:"starts_upstream"`
+	}
+	if err := json.Unmarshal(discoverResp.Result, &result); err != nil {
+		t.Fatalf("decode server/discover: %v", err)
+	}
+	if result.ServerInfo.Name != "lazy-mcp-wrapper/fake" {
+		t.Fatalf("server name = %q", result.ServerInfo.Name)
+	}
+	if !result.Protocol.StatelessInbound || !result.Protocol.LegacyInitialize {
+		t.Fatalf("protocol = %#v", result.Protocol)
+	}
+	if result.StartsUpstream {
+		t.Fatalf("starts_upstream = true, want false")
+	}
+
+	status, err := QueryStatus(socketPath)
+	if err != nil {
+		t.Fatalf("QueryStatus() error = %v", err)
+	}
+	if len(status.Servers) != 1 || status.Servers[0].HasReal {
+		t.Fatalf("real MCP started during discovery: %#v", status.Servers)
+	}
+
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func TestClientUnknownName(t *testing.T) {
 	tempDir := t.TempDir()
 	socketPath := testSocketPath(t)

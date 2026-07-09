@@ -165,10 +165,10 @@ Current OAuth foundation:
 - `lazy-mcp-wrapper auth logout <name>` deletes local credentials.
 - `lazy-mcp-wrapper auth login <name>` runs a local callback server and SDK authorization-code flow, then stores the resulting token.
 - File-backed credential storage lives under `~/.lazy-mcp-wrapper/auth/` with private permissions.
-- The SDK Streamable HTTP backend has an OAuth handler that reads stored credentials and injects `Authorization: Bearer <token>`.
+- The SDK Streamable HTTP backend has an OAuth handler that reads stored credentials, validates they match the current wrapper config, and injects `Authorization: Bearer <token>`.
 - Expired stored tokens are refreshed and written back when the credential has both `refresh_token` and `token_url`.
 - OAuth configs require the SDK HTTP backend; explicit `http_backend: "native"` is rejected.
-- `setup` and `setup update` wrap OAuth-managed remotes only when a non-expired local credential exists.
+- `setup` and `setup update` wrap OAuth-managed remotes only when a non-expired local credential exists and matches the configured server URL, client ID, resource, and scopes.
 - OAuth-managed remotes without credentials remain direct in the client config and get an `auth login` blocker hint.
 - Remote MCPs configured with `auth = "chatgpt"` are not wrapped. Codex implements this by passing its internal ChatGPT `AuthProvider` into the Streamable HTTP client and adding those headers at request time; lazy-mcp-wrapper does not own that session provider.
 
@@ -191,12 +191,13 @@ Runtime rules:
 - OAuth-backed remote MCPs must default to `sharing: "session"`.
 - Shared daemon mode may still manage the local listener and lifecycle, but each client session must use its own OAuth-authenticated upstream session unless token ownership is explicitly proven safe.
 - Token refresh must be serialized per server/user to avoid duplicate refresh races.
+- Stored credentials must be bound to the configured server URL. When client ID, resource, or scopes are configured, those values must also match before a token can be used or refreshed.
 - ChatGPT-auth remote MCPs must stay direct in Codex unless the wrapper gets an explicit, supported way to receive equivalent per-session headers from the client.
 
 Acceptance:
 
 - OAuth configs default to `sharing: "session"` and reject `sharing: "shared"`.
-- `setup` skips OAuth-managed remotes, including Figma, until a stored credential exists; after login, it can wrap them as session-scoped SDK HTTP proxies.
+- `setup` skips OAuth-managed remotes, including Figma, until a matching stored credential exists; after login, it can wrap them as session-scoped SDK HTTP proxies.
 - OAuth login works against a local test OAuth-protected Streamable HTTP MCP server.
 - Expired access tokens refresh without exposing secrets in logs.
 - `logout` removes credentials.

@@ -69,7 +69,12 @@ func startSDKHTTPReal(ctx context.Context, cfg Config, logger *log.Logger, init 
 		if storeDir == "" {
 			storeDir = oauthstore.DefaultDir("")
 		}
-		transport.OAuthHandler = oauthstore.NewStoredTokenHandler(&oauthstore.FileStore{Dir: storeDir}, cfg.Name)
+		transport.OAuthHandler = oauthstore.NewStoredTokenHandlerWithBinding(&oauthstore.FileStore{Dir: storeDir}, cfg.Name, oauthstore.CredentialBinding{
+			ServerURL: cfg.URL,
+			ClientID:  cfg.OAuthClientID,
+			Resource:  cfg.OAuthResource,
+			Scopes:    cfg.OAuthScopes,
+		})
 	}
 	session, err := client.Connect(startCtx, transport, nil)
 	if err != nil {

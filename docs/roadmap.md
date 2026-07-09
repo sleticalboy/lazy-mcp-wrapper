@@ -58,6 +58,21 @@
 
 ---
 
+## 方向七：Stateless MCP 兼容
+
+**目标**：跟进 MCP 2026-07-28 RC 的 stateless core 方向，让 wrapper 成为 stateless client 与 legacy/stateful MCP server 之间的兼容层。详见 [stateless-mcp-plan.md](stateless-mcp-plan.md)。
+
+- [x] **0. 计划文档与边界定义**：明确 protocol stateless 与 `sharing: "session"` 生命周期隔离不是同一件事，保留 legacy initialize 支持
+- [x] **1. Stateless client inbound**：允许 client 不发 `initialize`，直接调用 `tools/list`、`tools/call`、`resources/*`、`prompts/*`；legacy upstream 由 wrapper 内部补初始化
+- [x] **2. `server/discover`**：新增 discovery 响应，暴露 wrapper 能力、协议模式、缓存能力，不默认启动重型 upstream
+- [x] **3. Cache metadata**：支持 `ttlMs` / `cacheScope`，让 `tools/list` 缓存与新规范的缓存语义对齐
+- [x] **4. Stateless HTTP upstream**：增加 `upstream_protocol_mode: auto|legacy|stateless`，native `streamable-http` 可跳过 upstream `initialize`；SDK/OAuth stateless 等官方 SDK 支持
+- [x] **5. OAuth hardening**：运行时和 setup 均校验 OAuth credential 与 server URL、client、resource、scopes 的绑定；issuer/授权响应校验待上游元数据和 SDK 支持完善
+
+不做：短期移除 legacy `initialize`、把所有 MCP 全局共享、把 Figma 作为 stateless 兼容的默认目标、立即重命名 `sharing` 字段。
+
+---
+
 ## 方向四：Windows 支持
 
 **目标**：覆盖 Windows 开发者，扩大用户群。详见 [plan-windows.md](plan-windows.md)。

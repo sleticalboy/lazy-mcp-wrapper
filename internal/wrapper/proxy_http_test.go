@@ -73,6 +73,28 @@ func TestStreamableHTTPProxyForwardsToolsListJSON(t *testing.T) {
 	session.wait()
 }
 
+func TestStatelessStreamableHTTPProxySkipsUpstreamInitialize(t *testing.T) {
+	backend := newTestHTTPMCP(t, "streamable-json")
+	defer backend.Close()
+
+	cfg := httpTestConfig("fake", backend.URL, "streamable-http")
+	cfg.UpstreamMode = "stateless"
+	proxy := NewProxy(cfg, log.New(testWriter{t: t}, "", 0))
+	session := startProxySession(t, proxy)
+	defer session.closeInput()
+
+	session.writeRequest(1, "tools/list", map[string]any{})
+	assertEchoTool(t, readResponse(t, session.reader, "tools/list"))
+	if got := backend.methodCount("initialize"); got != 0 {
+		t.Fatalf("initialize count = %d, want 0", got)
+	}
+	if got := backend.methodCount("tools/list"); got != 1 {
+		t.Fatalf("tools/list count = %d, want 1", got)
+	}
+	session.closeInput()
+	session.wait()
+}
+
 func TestSDKStreamableHTTPProxyForwardsToolsListJSON(t *testing.T) {
 	backend := newTestHTTPMCP(t, "streamable-json")
 	defer backend.Close()
@@ -163,6 +185,9 @@ func TestOAuthHTTPProxyForwardsStoredBearerToken(t *testing.T) {
 	store := &oauthstore.FileStore{Dir: t.TempDir()}
 	if err := store.Save(oauthstore.Credential{
 		Name:        "oauth",
+		ServerURL:   backend.URL,
+		Resource:    backend.URL,
+		Scopes:      []string{"tools"},
 		AccessToken: "stored-token",
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -170,6 +195,8 @@ func TestOAuthHTTPProxyForwardsStoredBearerToken(t *testing.T) {
 
 	cfg := httpTestConfig("oauth", backend.URL, "streamable-http")
 	cfg.Auth = "oauth"
+	cfg.OAuthResource = backend.URL
+	cfg.OAuthScopes = []string{"tools"}
 	cfg.OAuthStoreDir = store.Dir
 	proxy := NewProxy(cfg, log.New(testWriter{t: t}, "", 0))
 	session := startProxySession(t, proxy)
@@ -337,6 +364,7 @@ type testHTTPMCP struct {
 	notifyToolsChanged bool
 	mu                 sync.Mutex
 	headers            map[string]string
+	methods            map[string]int
 	sessions           map[string]chan jsonrpc.Message
 	streamableSubs     []chan jsonrpc.Message
 }
@@ -346,6 +374,7 @@ func newTestHTTPMCP(t *testing.T, mode string) *testHTTPMCP {
 	m := &testHTTPMCP{
 		mode:     mode,
 		headers:  map[string]string{},
+		methods:  map[string]int{},
 		sessions: map[string]chan jsonrpc.Message{},
 	}
 	m.Server = httptest.NewServer(http.HandlerFunc(m.handle))
@@ -412,6 +441,7 @@ func (m *testHTTPMCP) handleSSEPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	m.recordMethod(msg.Method)
 	if msg.IsNotification() {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -435,6 +465,7 @@ func (m *testHTTPMCP) handleStreamable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	m.recordMethod(msg.Method)
 	if msg.IsNotification() {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -495,6 +526,18 @@ func (m *testHTTPMCP) header(name string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.headers[name]
+}
+
+func (m *testHTTPMCP) recordMethod(method string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.methods[method]++
+}
+
+func (m *testHTTPMCP) methodCount(method string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.methods[method]
 }
 
 func testHTTPResponse(msg jsonrpc.Message, notifyToolsChanged bool) (jsonrpc.Message, *jsonrpc.Message) {

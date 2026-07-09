@@ -146,6 +146,9 @@ func TestUpdateAddsFigmaWrapperWhenOAuthCredentialExists(t *testing.T) {
 	if err := oauthstore.NewFileStore(home).Save(oauthstore.Credential{
 		Name:        "figma",
 		ServerURL:   "https://mcp.figma.com/mcp",
+		ClientID:    "figma-client",
+		Resource:    "https://mcp.figma.com",
+		Scopes:      []string{"tools:read"},
 		AccessToken: "stored-token",
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)

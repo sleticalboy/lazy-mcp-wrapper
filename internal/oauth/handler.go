@@ -15,6 +15,7 @@ var ErrLoginRequired = errors.New("oauth login required")
 type StoredTokenHandler struct {
 	Store      *FileStore
 	Name       string
+	Expected   CredentialBinding
 	HTTPClient *http.Client
 }
 
@@ -22,6 +23,10 @@ var _ mcpauth.OAuthHandler = (*StoredTokenHandler)(nil)
 
 func NewStoredTokenHandler(store *FileStore, name string) *StoredTokenHandler {
 	return &StoredTokenHandler{Store: store, Name: name}
+}
+
+func NewStoredTokenHandlerWithBinding(store *FileStore, name string, expected CredentialBinding) *StoredTokenHandler {
+	return &StoredTokenHandler{Store: store, Name: name, Expected: expected}
 }
 
 func (h *StoredTokenHandler) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
@@ -33,6 +38,9 @@ func (h *StoredTokenHandler) TokenSource(ctx context.Context) (oauth2.TokenSourc
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	if err := ValidateCredentialBinding(cred, h.Expected); err != nil {
 		return nil, err
 	}
 	token := tokenFromCredential(cred)

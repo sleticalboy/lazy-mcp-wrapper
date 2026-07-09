@@ -69,6 +69,34 @@ func TestProxyToolsListUsesCache(t *testing.T) {
 	}
 }
 
+func TestProxyToolsListCacheHitWithoutInitialize(t *testing.T) {
+	cfg := Config{
+		Name:           "fake",
+		Command:        "missing-real-mcp",
+		CacheDir:       t.TempDir(),
+		IdleTimeout:    Duration{Duration: time.Second},
+		StartupTimeout: Duration{Duration: time.Second},
+		CallTimeout:    Duration{Duration: time.Second},
+	}
+	if err := cfg.writeCachedToolsList(json.RawMessage(`{"tools":[{"name":"cached"}]}`)); err != nil {
+		t.Fatalf("write cache: %v", err)
+	}
+
+	var in bytes.Buffer
+	clientWriter := jsonrpc.NewWriter(&in)
+	writeRequest(t, clientWriter, 1, "tools/list", map[string]any{})
+
+	var out bytes.Buffer
+	proxy := NewProxy(cfg, log.New(testWriter{t: t}, "", 0))
+	if err := proxy.Run(context.Background(), &in, &out); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	reader := jsonrpc.NewReader(&out)
+	resp := readResponse(t, reader, "tools/list")
+	assertToolNames(t, resp, []string{"cached"})
+}
+
 func TestProxyToolsListChangedNotificationInvalidatesCache(t *testing.T) {
 	dir := t.TempDir()
 	fakePath := filepath.Join(dir, "fake-mcp")

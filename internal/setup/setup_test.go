@@ -366,6 +366,9 @@ client_id = "figma-client"
 	if err := oauthstore.NewFileStore(home).Save(oauthstore.Credential{
 		Name:        "figma",
 		ServerURL:   "https://mcp.figma.com/mcp",
+		ClientID:    "figma-client",
+		Resource:    "https://mcp.figma.com",
+		Scopes:      []string{"tools:read"},
 		AccessToken: "stored-token",
 	}); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -405,6 +408,50 @@ client_id = "figma-client"
 	if strings.Contains(content, `oauth_resource`) || strings.Contains(content, `[mcp_servers.figma.oauth]`) || strings.Contains(content, `scopes =`) {
 		t.Fatalf("client update should remove remote oauth fields:\n%s", content)
 	}
+}
+
+func TestPlanSkipsOAuthRemoteMCPWithCredentialBindingMismatch(t *testing.T) {
+	home := t.TempDir()
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+auth = "oauth"
+oauth_resource = "https://mcp.figma.com"
+scopes = ["tools:read"]
+
+[mcp_servers.figma.oauth]
+client_id = "figma-client"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := oauthstore.NewFileStore(home).Save(oauthstore.Credential{
+		Name:        "figma",
+		ServerURL:   "https://old.example.test/mcp",
+		ClientID:    "figma-client",
+		Resource:    "https://mcp.figma.com",
+		Scopes:      []string{"tools:read"},
+		AccessToken: "stored-token",
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	plan, err := NewPlan(Options{
+		Home:       home,
+		BinaryPath: "/bin/lazy-mcp-wrapper",
+	})
+	if err != nil {
+		t.Fatalf("NewPlan() error = %v", err)
+	}
+	if len(plan.WrapperConfigs) != 0 {
+		t.Fatalf("wrapper configs = %#v", plan.WrapperConfigs)
+	}
+	if !strings.Contains(strings.Join(plan.Blockers, "\n"), "auth login figma") {
+		t.Fatalf("blockers = %#v, want auth login hint", plan.Blockers)
+	}
+	assertDecision(t, plan, "figma", "skip", "skipped-oauth-missing-credential")
 }
 
 func TestPlanSkipsOAuthRemoteMCP(t *testing.T) {

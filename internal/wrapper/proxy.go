@@ -236,6 +236,8 @@ func (p *Proxy) handleRequest(ctx context.Context, msg jsonrpc.Message, onRealCl
 		})
 	case "ping":
 		return jsonrpc.Response(msg.ID, map[string]any{})
+	case "server/discover":
+		return jsonrpc.Response(msg.ID, p.discovery())
 	case "tools/list":
 		return p.toolsList(ctx, msg, onRealClient, afterWrite)
 	case "tools/call", "prompts/list", "prompts/get", "resources/list", "resources/read", "resources/templates/list":
@@ -396,6 +398,9 @@ func (p *Proxy) ensureHTTPReal(ctx context.Context) (realBackend, error) {
 		client realBackend
 		err    error
 	)
+	if p.cfg.StatelessHTTPUpstream() && p.cfg.UseSDKHTTPBackend() {
+		return nil, fmt.Errorf("stateless HTTP upstream requires native http_backend and auth none")
+	}
 	if p.cfg.UseSDKHTTPBackend() {
 		client, err = startSDKHTTPReal(ctx, p.cfg, p.log, init)
 	} else {

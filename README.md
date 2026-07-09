@@ -98,7 +98,8 @@ The recommended protocol is `streamable-http` (MCP spec 2025-03-26):
   "name": "my-remote-mcp",
   "url": "https://example.com/mcp",
   "protocol": "streamable-http",
-  "auth": "none"
+  "auth": "none",
+  "upstream_protocol_mode": "auto"
 }
 ```
 
@@ -117,6 +118,8 @@ These remote MCP servers stay configured directly in the client:
 - Figma MCP, unless a supported pre-registered OAuth client and local credential are already configured. A real probe against `https://mcp.figma.com/mcp` returned HTTP 403 for dynamic OAuth client registration, so Figma should stay direct in Codex by default.
 - Remote MCP servers configured with `auth: "chatgpt"`, because Codex handles them by attaching its internal ChatGPT auth provider headers at request time. The wrapper does not own those per-session credentials.
 
+OAuth credentials are bound to the remote MCP config. At runtime and during `setup`, the stored credential must match the configured server URL, and must also match `oauth_client_id`, `oauth_resource`, and `oauth_scopes` when those fields are configured. If those values change, rerun `lazy-mcp-wrapper auth login <name> --config <client-mcp-config>`.
+
 The `protocol` field accepts:
 
 | Value | Description |
@@ -126,9 +129,19 @@ The `protocol` field accepts:
 
 > **`sse` (HTTP+SSE) is deprecated** by the MCP specification. It is supported for compatibility with legacy servers but should not be used for new deployments.
 
+The optional `upstream_protocol_mode` field controls how the wrapper talks to a remote HTTP upstream:
+
+| Value | Description |
+|-------|-------------|
+| `auto` | Default. Keeps current compatibility behavior and initializes the upstream. |
+| `legacy` | Forces legacy upstream initialization. |
+| `stateless` | Native `streamable-http` only. Skips the upstream `initialize` request. SDK-backed OAuth remotes do not support this mode yet. |
+
 ## Behavior
 
 - `initialize` is answered by the wrapper.
+- `server/discover` is answered by the wrapper before `initialize` and does not start the real MCP server.
+- Stateless clients may call wrapper methods such as `tools/list` and `tools/call` before `initialize`; legacy upstreams are still initialized internally when needed.
 - `tools/list`, `tools/call`, `prompts/*`, and `resources/*` are forwarded to the real MCP server.
 - The real MCP server is stopped after `idle_timeout`.
 - Logs go to `log_file`; stdout is reserved for MCP frames.
@@ -136,7 +149,7 @@ The `protocol` field accepts:
 - `real_framing` controls how the wrapper talks to the real MCP server:
   - `header` uses MCP `Content-Length` framing and is the default.
   - `jsonl` uses one JSON-RPC message per line. Context7 v3.2.2, Playwright MCP 1.62.0-alpha, and MasterGo Magic MCP currently use this mode.
-- `tools/list` is cached by default. Cache files are stored under the OS user cache directory unless `cache_dir` is set. `notifications/tools/list_changed` invalidates the cache before the notification is forwarded. Set `disable_cache` to `true` to always query the real MCP server.
+- `tools/list` is cached by default. Cache files are stored under the OS user cache directory unless `cache_dir` is set. `notifications/tools/list_changed` invalidates the cache before the notification is forwarded. Set `disable_cache` to `true` to always query the real MCP server. If an upstream `tools/list` result includes `ttlMs`, the cache expires by that TTL. `cacheScope: "session"` and `cacheScope: "private"` results are not persisted.
 - `sharing` controls daemon sharing strategy. `shared` reuses one proxy per MCP name. `session` creates one proxy per client connection for stateful MCPs.
 
 ## Cache and Inspect
@@ -242,6 +255,8 @@ args = ["client", "--socket", "/Users/you/.lazy-mcp-wrapper/lazy-mcpd.sock", "--
 ```
 
 Use `sharing: "shared"` for stateless or read-only MCP servers such as Context7 and MasterGo. Use `sharing: "session"` for stateful MCP servers such as Playwright; Codex sessions share the daemon entrypoint, while each client connection gets its own real MCP process.
+
+`sharing: "session"` is lifecycle isolation inside `lazy-mcp-wrapper`; it is not the MCP protocol session concept that the 2026 stateless MCP direction removes.
 
 On macOS, install the shared daemon as a user LaunchAgent:
 

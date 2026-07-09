@@ -305,9 +305,9 @@ func oauthRemoteBlocker(name string, server RawServer) string {
 		return fmt.Sprintf("%s: Figma MCP is kept direct; Figma rejects dynamic OAuth client registration, and no oauth.client_id is configured for wrapper-managed login", name)
 	}
 	if server.OAuthClientID != "" {
-		return fmt.Sprintf("%s: OAuth credential not found or expired; run lazy-mcp-wrapper auth login %s --config <client-mcp-config>", name, name)
+		return fmt.Sprintf("%s: OAuth credential not found, expired, or does not match config; run lazy-mcp-wrapper auth login %s --config <client-mcp-config>", name, name)
 	}
-	return fmt.Sprintf("%s: OAuth credential not found or expired; run lazy-mcp-wrapper auth login %s --url <remote-mcp-url>", name, name)
+	return fmt.Sprintf("%s: OAuth credential not found, expired, or does not match config; run lazy-mcp-wrapper auth login %s --url <remote-mcp-url>", name, name)
 }
 
 func (p Plan) Apply(opts Options) error {
@@ -434,11 +434,28 @@ func canWrapServer(home string, server RawServer) bool {
 	if !isOAuthManagedRemoteMCP(server) {
 		return false
 	}
-	status, err := oauthstore.NewFileStore(home).Status(server.Name)
+	store := oauthstore.NewFileStore(home)
+	status, err := store.Status(server.Name)
 	if err != nil {
 		return false
 	}
-	return status.Authenticated && status.HasAccessToken && !status.Expired
+	if !status.Authenticated || !status.HasAccessToken || status.Expired {
+		return false
+	}
+	cred, err := store.Load(server.Name)
+	if err != nil {
+		return false
+	}
+	return oauthstore.ValidateCredentialBinding(cred, oauthBindingFromRawServer(server)) == nil
+}
+
+func oauthBindingFromRawServer(server RawServer) oauthstore.CredentialBinding {
+	return oauthstore.CredentialBinding{
+		ServerURL: server.URL,
+		ClientID:  server.OAuthClientID,
+		Resource:  server.OAuthResource,
+		Scopes:    server.OAuthScopes,
+	}
 }
 
 func normalizeServerCommand(server RawServer) RawServer {

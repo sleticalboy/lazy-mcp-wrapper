@@ -72,8 +72,49 @@ func TestConfigHTTPDefaults(t *testing.T) {
 	if cfg.HTTPProtocol() != "streamable-http" {
 		t.Fatalf("HTTPProtocol() = %q", cfg.HTTPProtocol())
 	}
+	if cfg.UpstreamProtocolMode() != "auto" {
+		t.Fatalf("UpstreamProtocolMode() = %q, want auto", cfg.UpstreamProtocolMode())
+	}
 	if cfg.Headers["Authorization"] != "Bearer secret" {
 		t.Fatalf("header expansion = %q", cfg.Headers["Authorization"])
+	}
+}
+
+func TestConfigStatelessHTTPUpstreamMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "http.json")
+	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","upstream_protocol_mode":"stateless"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.UpstreamProtocolMode() != "stateless" {
+		t.Fatalf("UpstreamProtocolMode() = %q, want stateless", cfg.UpstreamProtocolMode())
+	}
+	if !cfg.StatelessHTTPUpstream() {
+		t.Fatal("StatelessHTTPUpstream() = false")
+	}
+}
+
+func TestConfigRejectsInvalidUpstreamProtocolMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "http.json")
+	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","upstream_protocol_mode":"magic"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "upstream_protocol_mode") {
+		t.Fatalf("LoadConfig() error = %v, want upstream_protocol_mode error", err)
+	}
+}
+
+func TestConfigRejectsStatelessSDKHTTPBackend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "http.json")
+	if err := os.WriteFile(path, []byte(`{"name":"remote","url":"https://example.test/mcp","http_backend":"sdk","upstream_protocol_mode":"stateless"}`), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := LoadConfig(path); err == nil || !strings.Contains(err.Error(), "native http_backend") {
+		t.Fatalf("LoadConfig() error = %v, want native http_backend error", err)
 	}
 }
 
